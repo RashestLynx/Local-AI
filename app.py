@@ -57,7 +57,7 @@ Be honest about uncertainty. Never tell the user to run commands or download "re
 
 PERF_WORDS = re.compile(r"\b(slow|lag|speed|fast|gpu|vram|ram|memory|cpu|temperature|hot|fan|performance|fps|freez)", re.I)
 
-APP_VERSION = "3.7"
+APP_VERSION = "3.8"
 RESTARTING = False
 CONFIG_PATH = HERE / "app-config.json"
 OUTPUT_DIR = HERE / "output"
@@ -554,8 +554,12 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/new-pin":
                 if not self.is_local():
                     return self.send_json({"error": "Only the PC can change the PIN."}, 403)
-                CFG["pin"] = f"{secrets.randbelow(10**6):06d}"
+                wanted = str(self.read_json().get("pin", "")).strip()
+                if wanted and not re.fullmatch(r"\d{4,8}", wanted):
+                    return self.send_json({"error": "Use 4 to 8 numbers."}, 400)
+                CFG["pin"] = wanted or f"{secrets.randbelow(10**6):06d}"
                 CONFIG_PATH.write_text(json.dumps(CFG, indent=2), encoding="utf-8")
+                print(f"PIN changed on the PC. New PIN: {CFG['pin']}")
                 return self.send_json({"pin": CFG["pin"]})
             if path == "/api/open-folder":
                 if not self.is_local():

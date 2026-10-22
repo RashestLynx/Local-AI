@@ -324,7 +324,7 @@
     <img src="/icon-192.png" width="64" height="64" style="border-radius:16px" alt="">
     <h2 style="margin:12px 0 4px">Local AI</h2>
     <div style="color:var(--muted)">Enter the PIN shown on your PC<br>(Settings &rsaquo; Use on your phone)</div>
-    <input id="pinIn" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="------">
+    <input id="pinIn" type="password" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="PIN">
     <button class="btn primary" id="pinBtn" style="width:100%;padding:12px">Unlock</button>
     <div id="pinErr" class="err" style="margin-top:10px;min-height:1.5em"></div>
   </div>
@@ -684,8 +684,17 @@ function openSheet() {
       ${links.map(([k, u]) => `<div style="margin:6px 0">${k}: <code>${esc(u)}</code></div>`).join("") || "<div>No network found.</div>"}
       PIN:<div class="pin">${esc(p.pin)}</div>
       Then tap <b>Share → Add to Home Screen</b> (iPhone) or <b>⋮ → Add to Home screen</b> (Android).
-      <div class="row"><button class="btn" id="newPin">Change PIN</button></div>`;
-    $("#newPin").onclick = async () => { const r = await fetch("/api/new-pin", { method: "POST" }); const j = await r.json(); S.status.phone.pin = j.pin; openSheet(); };
+      <div class="row"><input id="ownPin" type="password" inputmode="numeric" maxlength="8" placeholder="Your own PIN (4-8 numbers)"
+        style="flex:1;min-width:150px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:7px 10px;font-size:16px">
+        <button class="btn primary" id="setPin">Set PIN</button><button class="btn" id="newPin">Random PIN</button></div>
+      <div class="note" id="pinMsg">This PIN unlocks your phone and confirms deleting files and removing apps.</div>`;
+    const changePin = async body => {
+      const j = await post("/api/new-pin", body);
+      if (j.error) { $("#pinMsg").textContent = j.error; $("#pinMsg").className = "bad-msg"; return; }
+      S.status.phone.pin = j.pin; openSheet(); $("#pinMsg").textContent = "PIN changed. Phones need the new PIN next time."; $("#pinMsg").className = "ok-msg";
+    };
+    $("#setPin").onclick = () => changePin({ pin: $("#ownPin").value.trim() });
+    $("#newPin").onclick = () => changePin({});
   }
   $("#sheetBg").style.display = $("#sheet").style.display = "block";
 }
@@ -723,7 +732,6 @@ async function unlock() {
 }
 $("#pinBtn").onclick = unlock;
 $("#pinIn").addEventListener("keydown", e => { if (e.key === "Enter") unlock(); });
-$("#pinIn").addEventListener("input", e => { if (e.target.value.length === 6) unlock(); });
 
 /* ---------- security ---------- */
 let secPoll = null;
