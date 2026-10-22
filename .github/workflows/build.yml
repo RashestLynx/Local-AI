@@ -68,10 +68,13 @@ jobs:
       - run: dart run flutter_launcher_icons
       - name: Build APK (with retry)
         run: |
-          for attempt in 1 2 3; do
-            if flutter build apk --release; then exit 0; fi
+          for attempt in 1 2; do
+            if flutter build apk --release 2>&1 | tee build.log; test ${PIPESTATUS[0]} -eq 0; then exit 0; fi
             echo "Attempt $attempt failed; retrying..."; flutter clean || true; flutter pub get; sleep 10
           done
+          # Surface the error as annotations so it's readable without the raw log.
+          grep -iE "error|what went wrong|exception|failed|requires|incompatible|> " build.log | grep -v "^\s*at " | head -30 \
+            | while IFS= read -r line; do echo "::error::${line:0:400}"; done
           exit 1
       - run: cp build/app/outputs/flutter-apk/app-release.apk "$GITHUB_WORKSPACE/local-ai-android.apk"
       - uses: actions/upload-artifact@v4
