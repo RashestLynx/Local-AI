@@ -66,6 +66,12 @@ jobs:
       - run: python3 tool/patch_platforms.py
       - run: flutter pub get
       - run: dart run flutter_launcher_icons
+      # Some plugins still reference the old 'proguard-android.txt', which the
+      # current Android Gradle Plugin rejects. Point them at the supported file.
+      - name: Patch plugin ProGuard settings
+        run: |
+          grep -rl "proguard-android.txt" "$HOME/.pub-cache/hosted" --include="build.gradle*" 2>/dev/null \
+            | while read -r f; do echo "patching $f"; sed -i "s/proguard-android.txt/proguard-android-optimize.txt/g" "$f"; done || true
       - name: Build APK (with retry)
         run: |
           for attempt in 1 2; do
