@@ -1,0 +1,6 @@
+[
+  {"name": "OneDrive", "kind": "special", "id": "onedrive"},
+  {"name": "Phone Link", "kind": "appx", "id": "Microsoft.YourPhone"},
+  {"name": "Bing News", "kind": "appx", "id": "Microsoft.BingNews"},
+  {"name": "Stop Edge running in the background", "kind": "edge-quiet", "id": "edge"}
+]

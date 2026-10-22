@@ -1,0 +1,136 @@
+name: Build
+
+# Runs the Python tests, then builds the phone apps:
+#   - Android APK (unsigned; Android shows an "unknown app" prompt when installing)
+#   - iOS .ipa (unsigned; install with Sideloadly or AltStore using your Apple ID)
+# Every push to main publishes them to the rolling "latest" GitHub Release.
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  FLUTTER_VERSION: "3.47.7"
+
+jobs:
+  python:
+    name: Python tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m py_compile app.py coder_team.py scanner.py pcinfo.py files.py diag_tool.py phone_info.py assistant.py
+      - run: python -m unittest discover -s tests -v
+
+  flutter-check:
+    name: Phone app - analyze & test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze --no-fatal-infos
+      - run: flutter test
+
+  android:
+    name: Android APK
+    needs: [flutter-check]
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Create Android project files
+        run: flutter create --platforms android --org com.rashestlynx --project-name local_ai .
+      - run: python3 tool/patch_platforms.py
+      - run: flutter pub get
+      - run: dart run flutter_launcher_icons
+      - name: Build APK (with retry)
+        run: |
+          for attempt in 1 2 3; do
+            if flutter build apk --release; then exit 0; fi
+            echo "Attempt $attempt failed; retrying..."; flutter clean || true; flutter pub get; sleep 10
+          done
+          exit 1
+      - run: cp build/app/outputs/flutter-apk/app-release.apk "$GITHUB_WORKSPACE/local-ai-android.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: local-ai-android.apk
+
+  ios:
+    name: iOS (unsigned .ipa)
+    needs: [flutter-check]
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Create iOS project files
+        run: flutter create --platforms ios --org com.rashestlynx --project-name local_ai .
+      - run: python3 tool/patch_platforms.py
+      - run: flutter pub get
+      - run: dart run flutter_launcher_icons
+      - run: flutter build ios --release --no-codesign
+      - name: Package unsigned .ipa
+        run: |
+          cd build/ios/iphoneos
+          mkdir -p Payload
+          cp -R Runner.app Payload/Runner.app
+          zip -qr "$GITHUB_WORKSPACE/local-ai-ios-unsigned.ipa" Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ios
+          path: local-ai-ios-unsigned.ipa
+
+  release:
+    name: Publish downloads
+    needs: [python, android, ios]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest build
+          prerelease: true
+          make_latest: true
+          body: >-
+            Phone apps for Local AI. They connect to the Local AI server running on
+            your PC (start it with the "Local AI" shortcut first).
+            Android: download local-ai-android.apk and open it (allow installing from your browser).
+            iPhone: the .ipa is unsigned - install it with Sideloadly or AltStore using your Apple ID.
+          files: artifacts/*

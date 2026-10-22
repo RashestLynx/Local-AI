@@ -1,0 +1,29 @@
+# private, per-PC data - never commit
+app-config.json
+app-log.txt
+learning/
+security/
+quarantine/
+uploads/
+output/
+test-output/
+test-result.txt
+odysseus/
+# generated at runtime
+icon.png
+icon-192.png
+icon.ico
+__pycache__/
+*.pyc
+# pc-cleanup run outputs
+tools/pc-cleanup/remove-list.json
+tools/pc-cleanup/*.done.json
+tools/pc-cleanup/cleanup-log.txt
+tools/pc-cleanup/installed-apps.json
+# flutter
+mobile/build/
+mobile/.dart_tool/
+mobile/android/
+mobile/ios/
+mobile/.flutter-plugins*
+mobile/pubspec.lock

@@ -1,0 +1,932 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<title>Local AI</title>
+<meta name="theme-color" content="#0f1115">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Local AI">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --panel2: #1e222b; --line: #2a2f3a;
+    --text: #e8eaee; --muted: #9aa3b2; --accent: #7cc4ff; --accent2: #ff8a65;
+    --ok: #5fd39a; --bad: #ff6b6b; --warn: #ffc857;
+    --radius: 14px; --mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+    --safe-b: env(safe-area-inset-bottom, 0px); --safe-t: env(safe-area-inset-top, 0px);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-text-size-adjust: 100%; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  .app { display: flex; flex-direction: column; height: 100dvh; max-width: 900px; margin: 0 auto; }
+
+  /* header */
+  header { display: flex; align-items: center; gap: 10px; padding: calc(10px + var(--safe-t)) 14px 10px;
+    border-bottom: 1px solid var(--line); background: var(--bg); position: sticky; top: 0; z-index: 5; }
+  .logo { width: 28px; height: 28px; border-radius: 8px; flex: none; }
+  .title { font-weight: 650; letter-spacing: .2px; }
+  .seg { display: flex; background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 3px; margin-left: auto; }
+  .seg button { border: 0; background: none; padding: 6px 14px; border-radius: 999px; color: var(--muted); font-weight: 600; }
+  .seg button.on { background: var(--panel2); color: var(--text); box-shadow: 0 0 0 1px var(--line) inset; }
+  .seg button.on[data-mode=code] { color: var(--accent2); }
+  .seg button.on[data-mode=chat] { color: var(--accent); }
+  .seg button.on[data-mode=search] { color: var(--ok); }
+  .send.search { background: var(--ok); }
+  @media (max-width: 420px) { .app header .title { display: none; } header { gap: 6px; padding-left: 10px; padding-right: 10px; }
+    .seg button { padding: 6px 10px; } .icon-btn { width: 34px; height: 34px; } }
+  @media (max-width: 430px) { #newBtn { display: none; } .logo { display: none; } }
+  @media (max-width: 350px) { .logo { display: none; } .seg button { padding: 6px 8px; font-size: 14px; } }
+  .icon-btn { border: 1px solid var(--line); background: var(--panel); width: 36px; height: 36px; border-radius: 10px;
+    display: grid; place-items: center; flex: none; }
+  .icon-btn svg { width: 18px; height: 18px; }
+
+  /* messages */
+  main { flex: 1; overflow-y: auto; padding: 16px 14px 8px; overscroll-behavior: contain; }
+  .empty { text-align: center; color: var(--muted); margin: 12vh auto 0; max-width: 420px; }
+  .empty h2 { color: var(--text); font-size: 20px; margin: 10px 0 6px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 16px; }
+  .chip { border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 7px 12px; font-size: 13.5px; color: var(--text); }
+  .msg { margin: 0 0 16px; display: flex; flex-direction: column; }
+  .msg.user { align-items: flex-end; }
+  .bubble { max-width: 88%; padding: 10px 14px; border-radius: var(--radius); overflow-wrap: anywhere; }
+  .user .bubble { background: #233247; border: 1px solid #2d4260; white-space: pre-wrap; }
+  .bot .bubble { background: transparent; padding-left: 2px; max-width: 100%; }
+  .meta { font-size: 12px; color: var(--muted); margin: 4px 2px 0; }
+  .status { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13.5px; margin: 6px 0; }
+  .spin { width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; flex: none; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .err { color: var(--bad); }
+
+  /* markdown */
+  .md p { margin: 0 0 10px; } .md p:last-child { margin-bottom: 0; }
+  .md h1, .md h2, .md h3 { font-size: 16px; margin: 14px 0 6px; }
+  .md ul, .md ol { margin: 0 0 10px; padding-left: 22px; }
+  .md a { color: var(--accent); }
+  .md code { font-family: var(--mono); font-size: 13px; background: var(--panel2); padding: 1px 5px; border-radius: 5px; }
+  .codebox { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; margin: 8px 0 12px; background: #0b0d11; }
+  .codebar { display: flex; align-items: center; gap: 6px; padding: 6px 8px 6px 12px; background: var(--panel); border-bottom: 1px solid var(--line);
+    font-size: 12.5px; color: var(--muted); }
+  .codebar span { margin-right: auto; }
+  .codebar button { border: 1px solid var(--line); background: var(--panel2); border-radius: 8px; padding: 3px 9px; font-size: 12.5px; }
+  .codebox pre { margin: 0; padding: 12px; overflow-x: auto; font: 13px/1.5 var(--mono); }
+  .md .codebox code { background: none; padding: 0; }
+
+  /* code job card */
+  .job { border: 1px solid var(--line); background: var(--panel); border-radius: var(--radius); padding: 12px; }
+  .steps { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 8px; }
+  .step { font-size: 12px; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+  .step.on { color: var(--text); border-color: var(--accent); }
+  .step.pass { color: var(--ok); border-color: #2c6b4c; }
+  .step.fail { color: var(--bad); border-color: #6b2c2c; }
+  details { margin-top: 6px; } summary { color: var(--muted); font-size: 13px; cursor: pointer; }
+  .log { max-height: 260px; overflow: auto; font: 12px/1.45 var(--mono); white-space: pre-wrap; color: #b9c0cc;
+    background: #0b0d11; border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin-top: 6px; }
+  .badge { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; font-size: 14px; }
+  .badge.ok { color: var(--ok); } .badge.warn { color: var(--warn); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  .btn { border: 1px solid var(--line); background: var(--panel2); border-radius: 10px; padding: 7px 12px; font-size: 13.5px; }
+  .btn.primary { background: var(--accent); color: #08111c; border-color: transparent; font-weight: 650; }
+  .fb { display: flex; gap: 6px; margin-top: 6px; align-items: center; }
+  .fb button { border: 1px solid var(--line); background: none; border-radius: 8px; padding: 2px 8px; font-size: 14px; color: var(--muted); }
+  .fb button.on { border-color: var(--accent); color: var(--text); background: var(--panel2); }
+  .fb span { font-size: 12px; color: var(--muted); }
+  .sheet textarea { width: 100%; min-height: 64px; background: var(--panel2); border: 1px solid var(--line); border-radius: 10px;
+    padding: 8px 10px; font-size: 14px; resize: vertical; outline: none; }
+  .rule { margin: 10px 0; } .rule label { display: block; font-size: 13.5px; margin-bottom: 4px; }
+  .src { font-size: 12.5px; color: var(--muted); margin-top: 6px; }
+  .src a { color: var(--muted); }
+
+  /* composer */
+  footer { padding: 8px 12px calc(10px + var(--safe-b)); border-top: 1px solid var(--line); background: var(--bg); }
+  .attach-pill { display: none; align-items: center; gap: 8px; font-size: 13px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 999px; padding: 4px 6px 4px 12px; margin: 0 0 8px; width: fit-content; max-width: 100%; }
+  .attach-pill button { border: 0; background: var(--panel2); border-radius: 999px; width: 22px; height: 22px; }
+  .composer { display: flex; align-items: flex-end; gap: 8px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 18px; padding: 6px; }
+  .composer:focus-within { border-color: #3a4456; }
+  textarea { flex: 1; resize: none; border: 0; background: none; outline: none; padding: 8px 6px; max-height: 40vh;
+    font-size: 16px; /* 16px stops iPhone zooming in */ }
+  .send { width: 38px; height: 38px; border-radius: 12px; border: 0; background: var(--accent); color: #08111c;
+    display: grid; place-items: center; flex: none; }
+  .send.code { background: var(--accent2); }
+  .send.stop { background: var(--panel2); color: var(--text); border: 1px solid var(--line); }
+  .send svg { width: 18px; height: 18px; }
+  .attach { display: none; }
+  .mode-code .attach { display: grid; }
+  .hint { font-size: 12px; color: var(--muted); margin: 6px 4px 0; display: flex; justify-content: space-between; gap: 8px; }
+
+  /* sheets */
+  .sheet-bg { position: fixed; inset: 0; background: rgba(0,0,0,.5); display: none; z-index: 20; }
+  .sheet { position: fixed; left: 50%; transform: translateX(-50%); bottom: 0; width: min(560px, 100%); max-height: 88dvh; overflow: auto;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 18px 18px 0 0; padding: 16px 16px calc(18px + var(--safe-b));
+    display: none; z-index: 21; }
+  .sheet h3 { margin: 4px 0 12px; font-size: 17px; }
+  .sheet h4 { margin: 18px 0 8px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .6px; }
+  .field { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+  .field label { color: var(--text); } .field small { display: block; color: var(--muted); font-size: 12.5px; }
+  select, input[type=number] { background: var(--panel2); border: 1px solid var(--line); border-radius: 9px; padding: 6px 8px; max-width: 55%; }
+  .switch { appearance: none; width: 42px; height: 24px; background: var(--line); border-radius: 999px; position: relative; flex: none; margin: 0; }
+  .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: .15s; }
+  .switch:checked { background: var(--accent); } .switch:checked::after { left: 21px; }
+  .phonebox { background: var(--panel2); border: 1px solid var(--line); border-radius: 12px; padding: 12px; font-size: 14px; }
+  .phonebox code { font-family: var(--mono); color: var(--accent); user-select: all; }
+  .pin { font: 700 26px/1 var(--mono); letter-spacing: 6px; color: var(--text); margin: 6px 0; }
+
+  /* security */
+  .sec { position: fixed; inset: 0; background: var(--bg); z-index: 25; display: none; flex-direction: column; }
+  .sec header { position: static; }
+  .sec-body { flex: 1; overflow-y: auto; padding: 14px; max-width: 900px; width: 100%; margin: 0 auto; }
+  .sec-tabs { display: flex; gap: 6px; margin: 0 0 12px; }
+  .sec-tabs button { border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 6px 12px; color: var(--muted); }
+  .sec-tabs button.on { color: var(--text); border-color: var(--accent); }
+  .bar { height: 8px; background: var(--panel2); border-radius: 99px; overflow: hidden; margin: 8px 0; }
+  .bar div { height: 100%; background: var(--accent); width: 0; transition: width .3s; }
+  .find { border: 1px solid var(--line); background: var(--panel); border-radius: 12px; padding: 12px; margin: 0 0 10px; }
+  .find .top { display: flex; gap: 8px; align-items: baseline; }
+  .lvl { font-size: 11.5px; font-weight: 700; padding: 2px 8px; border-radius: 99px; text-transform: uppercase; letter-spacing: .4px; flex: none; }
+  .lvl.high { background: #4a1d1d; color: #ff9b9b; } .lvl.medium { background: #4a3a14; color: #ffd27a; } .lvl.low { background: #1d2f45; color: #9ccfff; }
+  .find .name { font-weight: 600; overflow-wrap: anywhere; }
+  .find .path { font: 12px var(--mono); color: var(--muted); overflow-wrap: anywhere; margin: 4px 0; }
+  .find ul { margin: 6px 0 0; padding-left: 18px; font-size: 13.5px; }
+  .find .ai { margin-top: 8px; background: var(--panel2); border-radius: 10px; padding: 10px; font-size: 14px; }
+  .note { font-size: 13px; color: var(--muted); margin: 6px 0 12px; }
+  .ok-msg { color: var(--ok); font-size: 13px; margin-top: 6px; } .bad-msg { color: var(--bad); font-size: 13px; margin-top: 6px; }
+
+  /* files */
+  .fl-bar { display: flex; gap: 8px; margin: 0 0 10px; flex-wrap: wrap; }
+  .fl-bar input { flex: 1; min-width: 160px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font-size: 16px; outline: none; }
+  .crumb { font: 12.5px var(--mono); color: var(--muted); margin: 0 0 8px; overflow-wrap: anywhere; }
+  .fl { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .fl-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .fl-row:last-child { border-bottom: 0; } .fl-row:hover { background: var(--panel); }
+  .fl-row .ic { width: 22px; text-align: center; flex: none; }
+  .fl-row .nm { flex: 1; overflow-wrap: anywhere; } .fl-row .mt { font-size: 12px; color: var(--muted); flex: none; text-align: right; }
+  .fl-row.sel { background: var(--panel2); }
+  .fl-acts { padding: 8px 12px 12px; background: var(--panel2); border-bottom: 1px solid var(--line); }
+  .preview { max-height: 50vh; overflow: auto; font: 12.5px/1.5 var(--mono); white-space: pre-wrap; background: #0b0d11; border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin-top: 8px; }
+  .hits { margin-top: 8px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .hits .fl-row { padding: 7px 10px; font-size: 13.5px; }
+
+  /* lock */
+  .lock { position: fixed; inset: 0; background: var(--bg); display: none; align-items: center; justify-content: center; z-index: 30; padding: 24px; }
+  .lockcard { width: min(360px, 100%); text-align: center; }
+  .lockcard input { width: 100%; text-align: center; font: 700 28px var(--mono); letter-spacing: 10px; padding: 12px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 14px; margin: 16px 0 10px; outline: none; }
+  .banner { background: #3a2a12; border: 1px solid #6b4b1d; color: #ffd9a0; border-radius: 12px; padding: 10px 12px; margin: 0 0 14px; font-size: 14px; }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <header>
+    <img class="logo" src="/icon-192.png" alt="">
+    <div class="title">Local AI</div>
+    <div class="seg" role="tablist">
+      <button data-mode="chat" class="on">Chat</button>
+      <button data-mode="search">Search</button>
+      <button data-mode="code">Code</button>
+    </div>
+    <button class="icon-btn" id="newBtn" title="New conversation" aria-label="New conversation">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+    </button>
+    <button class="icon-btn" id="filesBtn" title="Files on your PC" aria-label="Files">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+    </button>
+    <button class="icon-btn" id="secBtn" title="Security scan" aria-label="Security scan">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+    </button>
+    <button class="icon-btn" id="setBtn" title="Settings" aria-label="Settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+    </button>
+  </header>
+
+  <main id="msgs"></main>
+
+  <footer>
+    <div class="attach-pill" id="pill"><span id="pillName"></span><button id="pillX" aria-label="Remove file">&times;</button></div>
+    <div class="composer">
+      <button class="icon-btn attach" id="attachBtn" title="Attach a code file to clean up or fix" aria-label="Attach file">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21.4 11.1 12.2 20.3a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></svg>
+      </button>
+      <input type="file" id="fileIn" hidden>
+      <textarea id="input" rows="1" placeholder="Message your AI..."></textarea>
+      <button class="send" id="sendBtn" aria-label="Send">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+      </button>
+    </div>
+    <div class="hint"><span id="hintL"></span><span id="hintR"></span></div>
+  </footer>
+</div>
+
+<div class="sheet-bg" id="sheetBg"></div>
+<div class="sheet" id="sheet">
+  <h3>Settings</h3>
+  <h4>Chat (everyday tasks)</h4>
+  <div class="field"><div><label>Model</label><small>Small and fast is best here</small></div><select id="sChat"></select></div>
+  <div class="field"><div><label>Also search the web</label><small>Search tab always does this</small></div><input type="checkbox" class="switch" id="sWeb"></div>
+  <h4>Search</h4>
+  <div class="field"><div><label>Model</label><small>Reads web pages and cites sources</small></div><select id="sSearch"></select></div>
+  <h4>Code team</h4>
+  <div class="field"><label>Writer</label><select id="sWriter"></select></div>
+  <div class="field"><label>Reviewer</label><select id="sReviewer"></select></div>
+  <div class="field"><label>Language</label>
+    <select id="sLang"><option value="">Auto (Python)</option><option>python</option><option>javascript</option><option>html</option><option>powershell</option><option>batch</option></select></div>
+  <div class="field"><div><label>Test-run the code</label><small>Runs the AI's code on your PC to catch bugs</small></div><input type="checkbox" class="switch" id="sRun"></div>
+  <div class="field"><div><label>Look up docs online</label><small>Only search terms leave your PC</small></div><input type="checkbox" class="switch" id="sCodeWeb"></div>
+  <div class="field"><label>Max fix rounds</label><input type="number" id="sRounds" min="1" max="8"></div>
+  <h4>Learning</h4>
+  <div class="field"><div><label>Learn from my feedback</label><small id="learnCounts">Rate answers with 👍 / 👎</small></div><input type="checkbox" class="switch" id="sLearn"></div>
+  <div class="rule"><label>Your rules for Chat</label><textarea id="rDaily" placeholder="e.g. Keep answers short. I live in the Central time zone."></textarea></div>
+  <div class="rule"><label>Your rules for Search</label><textarea id="rSearch" placeholder="e.g. Prefer official sources. Prices in USD."></textarea></div>
+  <div class="rule"><label>Your rules for Code</label><textarea id="rCode" placeholder="e.g. Use Python 3.11. Add comments. Windows paths."></textarea></div>
+  <div class="row"><button class="btn" data-forget="daily">Forget Chat lessons</button><button class="btn" data-forget="search">Forget Search lessons</button><button class="btn" data-forget="code">Forget Code lessons</button></div>
+  <div id="filesSec" style="display:none">
+    <h4>Files</h4>
+    <div class="rule"><label>Folders Local AI can see (one per line)</label><textarea id="rRoots" placeholder="Desktop&#10;Documents&#10;Downloads"></textarea></div>
+  </div>
+  <div id="phoneSec" style="display:none">
+    <h4>Use on your phone</h4>
+    <div class="phonebox" id="phoneBox"></div>
+  </div>
+  <div class="row" style="margin-top:16px"><button class="btn primary" id="sDone">Done</button></div>
+</div>
+
+<div class="sec" id="sec">
+  <header>
+    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="var(--ok)" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+    <div class="title">Security</div>
+    <button class="icon-btn" id="secClose" style="margin-left:auto" aria-label="Close">&times;</button>
+  </header>
+  <div class="sec-body">
+    <div class="sec-tabs"><button class="on" data-st="scan">Scan</button><button data-st="q">Quarantine</button></div>
+    <div id="secScan">
+      <div class="row">
+        <button class="btn primary" id="scanQuick">Quick scan</button>
+        <button class="btn" id="scanFull">Full scan</button>
+        <button class="btn" id="scanStop" style="display:none">Stop</button>
+        <button class="btn" id="scanUpdate">Update threat list</button>
+      </div>
+      <div class="note">Quick: startup programs, running programs, Downloads/Desktop/Temp/AppData. Full: your whole user folder (slower).
+        Nothing is deleted - "Quarantine" moves a file somewhere it can't run, and you can restore it.</div>
+      <div id="scanProg"></div>
+      <div id="scanList"></div>
+    </div>
+    <div id="secQ" style="display:none"></div>
+  </div>
+</div>
+
+<div class="sec" id="filesPanel">
+  <header>
+    <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+    <div class="title">Files on your PC</div>
+    <button class="icon-btn" id="filesClose" style="margin-left:auto" aria-label="Close">&times;</button>
+  </header>
+  <div class="sec-body">
+    <div class="fl-bar">
+      <input id="flSearch" type="search" placeholder="Search your files...">
+      <button class="btn" id="flUp">Up</button>
+      <button class="btn" id="flUpload">Upload</button>
+      <input type="file" id="flUploadIn" hidden multiple>
+    </div>
+    <div class="crumb" id="flCrumb"></div>
+    <div id="flList"></div>
+    <div class="note">Files are never changed. Delete needs your PIN every time and only moves things to the Recycle Bin. Uploads go to Downloads\From phone.</div>
+  </div>
+</div>
+
+<div class="lock" id="lock">
+  <div class="lockcard">
+    <img src="/icon-192.png" width="64" height="64" style="border-radius:16px" alt="">
+    <h2 style="margin:12px 0 4px">Local AI</h2>
+    <div style="color:var(--muted)">Enter the PIN shown on your PC<br>(Settings &rsaquo; Use on your phone)</div>
+    <input id="pinIn" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="------">
+    <button class="btn primary" id="pinBtn" style="width:100%;padding:12px">Unlock</button>
+    <div id="pinErr" class="err" style="margin-top:10px;min-height:1.5em"></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("lai_" + k); return v === null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("lai_" + k, JSON.stringify(v)); } catch {} }
+};
+
+let S = { mode: store.get("mode", "chat"), status: null, busy: false, controller: null, job: null, attach: null };
+let settings = Object.assign({ chat: "", search: "", writer: "", reviewer: "", web: false, run: true, codeWeb: true, rounds: 4, lang: "" }, store.get("settings", {}));
+let convo = store.get("convo", []);  // [{role, content, kind?, data?}]
+
+/* ---------- markdown (small, safe) ---------- */
+function esc(s) { return s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+function inline(s) {
+  return esc(s)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>")
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+}
+function codeBox(code, lang, extra = "") {
+  return `<div class="codebox"><div class="codebar"><span>${esc(lang || "code")}</span>${extra}<button data-copy>Copy</button></div><pre><code>${esc(code)}</code></pre></div>`;
+}
+function md(text) {
+  const parts = text.split(/```/);
+  let html = "";
+  parts.forEach((part, i) => {
+    if (i % 2 === 1) {
+      const nl = part.indexOf("\n");
+      const lang = nl > -1 ? part.slice(0, nl).trim() : "";
+      const code = nl > -1 ? part.slice(nl + 1) : part;
+      html += codeBox(code.replace(/\n$/, ""), lang);
+      return;
+    }
+    const lines = part.split("\n");
+    let list = null, para = [];
+    const flush = () => { if (para.length) { html += `<p>${inline(para.join("\n")).replace(/\n/g, "<br>")}</p>`; para = []; } };
+    const closeList = () => { if (list) { html += `</${list}>`; list = null; } };
+    for (const line of lines) {
+      let m;
+      if ((m = line.match(/^(#{1,3})\s+(.*)/))) { flush(); closeList(); html += `<h${m[1].length}>${inline(m[2])}</h${m[1].length}>`; }
+      else if ((m = line.match(/^\s*[-*•]\s+(.*)/))) { flush(); if (list !== "ul") { closeList(); html += "<ul>"; list = "ul"; } html += `<li>${inline(m[1])}</li>`; }
+      else if ((m = line.match(/^\s*\d+[.)]\s+(.*)/))) { flush(); if (list !== "ol") { closeList(); html += "<ol>"; list = "ol"; } html += `<li>${inline(m[1])}</li>`; }
+      else if (!line.trim()) { flush(); closeList(); }
+      else { closeList(); para.push(line); }
+    }
+    flush(); closeList();
+  });
+  return html;
+}
+
+/* ---------- rendering ---------- */
+const msgsEl = $("#msgs");
+function scrollDown(force) {
+  const near = msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 160;
+  if (force || near) msgsEl.scrollTop = msgsEl.scrollHeight;
+}
+function emptyState() {
+  const E = {
+    chat: ["Ask anything", "Everyday help, private on your PC.", ["Write a quick text to my landlord", "Give me a 20-minute workout", "Explain how a NAS works"]],
+    search: ["Search the web", "Looks it up online, reads the pages, and cites sources.", ["What's new in AI this week?", "Best budget NAS in 2026", "Weather this weekend in Chicago"]],
+    code: ["What should we build?", "A writer model codes it, your PC test-runs it, and a reviewer model checks it.", ["A script that sorts my Downloads by file type", "Rename photos by the date taken", "A simple to-do list web page"]],
+  }[S.mode];
+  const ideas = E[2];
+  msgsEl.innerHTML = `<div class="empty"><img src="/icon-192.png" width="56" height="56" style="border-radius:14px" alt="">
+    <h2>${E[0]}</h2>
+    <div>${E[1]}</div>
+    <div class="chips">${ideas.map(t => `<button class="chip">${esc(t)}</button>`).join("")}</div></div>`;
+  msgsEl.querySelectorAll(".chip").forEach(c => c.onclick = () => { input.value = c.textContent; grow(); input.focus(); });
+}
+function render() {
+  if (!convo.length) return emptyState();
+  msgsEl.innerHTML = "";
+  convo.forEach(m => msgsEl.appendChild(m.role === "user" ? userEl(m) : (m.kind === "job" ? jobEl(m) : botEl(m))));
+  scrollDown(true);
+}
+function userEl(m) {
+  const d = document.createElement("div"); d.className = "msg user";
+  d.innerHTML = `<div class="bubble"></div>${m.file ? `<div class="meta">Attached: ${esc(m.file)}</div>` : ""}`;
+  d.firstChild.textContent = m.content; return d;
+}
+function fbRow(m) {
+  if (!m.q) return "";
+  const i = convo.indexOf(m);
+  return `<div class="fb"><button data-fb="1" data-i="${i}" class="${m.rated > 0 ? "on" : ""}" aria-label="Good answer">👍</button>` +
+         `<button data-fb="-1" data-i="${i}" class="${m.rated < 0 ? "on" : ""}" aria-label="Bad answer">👎</button>` +
+         `<span>${m.rated ? "Thanks - it will learn from this" : ""}</span></div>`;
+}
+function botEl(m) {
+  const d = document.createElement("div"); d.className = "msg bot";
+  d.innerHTML = `<div class="bubble md">${md(m.content || "")}</div>`;
+  if (m.sources && m.sources.length) d.innerHTML += `<div class="src">Sources: ${m.sources.map(s => `<a href="${esc(s.url)}" target="_blank" rel="noopener">${esc(s.title.slice(0, 50))}</a>`).join(" · ")}</div>`;
+  if (m.error) d.innerHTML += `<div class="status err">${esc(m.error)}</div>`;
+  if (m.checks && m.checks.length) {
+    const mine = m.checks.filter(c => c.startsWith("diagtool")).map(c => c === "diagtool_scan" ? "health scan" : "knowledge base");
+    const live = m.checks.filter(c => !c.startsWith("diagtool")).length;
+    d.innerHTML += `<div class="meta">🔧 Used ${mine.length ? "your Diag-Tool " + mine.join(" + ") + (live ? " + " : "") : ""}${live ? live + " live PC check" + (live > 1 ? "s" : "") : ""}</div>`;
+  }
+  if (m.hits && m.hits.length) d.innerHTML += `<div class="hits">${m.hits.slice(0, 10).map(rowHTML).join("")}</div>`;
+  if (m.file) d.innerHTML += `<div class="meta">📎 Read ${esc(m.file)} from your PC</div>`;
+  if (m.took) d.innerHTML += `<div class="meta">Answered in ${fmtSec(m.took)}</div>`;
+  if (m.content && !m.streaming) d.innerHTML += fbRow(m);
+  return d;
+}
+function jobEl(m) {
+  const d = document.createElement("div"); d.className = "msg bot";
+  const r = m.data || {};
+  const steps = ["Research", "Write", "Test", "Review"];
+  const stepCls = s => (r.steps && r.steps[s]) || "";
+  let body = `<div class="job"><div class="steps">${steps.map(s => `<span class="step ${stepCls(s)}">${s}</span>`).join("")}</div>`;
+  if (!r.done) body += `<div class="status"><div class="spin"></div><span>${esc(r.status || "Working...")}</span></div>` +
+    (r.t0 ? `<div class="meta">${timerText(r.t0, r.key)}</div>` : "");
+  if (r.done && r.took) body += `<div class="meta">Finished in ${fmtSec(r.took)}</div>`;
+  if (!r.done) { /* still running */ }
+  else if (r.code) body += `<div class="badge ${r.approved ? "ok" : "warn"}">${r.approved ? "✓ Tested and approved" : "⚠ Finished without reviewer approval — check the log"}</div>`;
+  else body += `<div class="status err">${esc(r.stopped ? "Stopped." : (r.error || "No code was produced. Check the log."))}</div>`;
+  if (r.code) {
+    const extra = `<button data-dl="${esc(r.filename || "solution.txt")}">Download</button>` + (S.status && S.status.local && r.path ? `<button data-open="${esc(r.path)}">Open folder</button>` : "");
+    body += codeBox(r.code, (r.filename || "").split(".").pop(), extra);
+  }
+  body += `<details><summary>Show full log (${(r.log || []).length} lines)</summary><div class="log">${esc((r.log || []).join("\n"))}</div></details>`;
+  if (r.done && r.code) body += fbRow(m);
+  body += `</div>`;
+  d.innerHTML = body;
+  return d;
+}
+
+/* ---------- copy / download / open ---------- */
+msgsEl.addEventListener("click", async e => {
+  const b = e.target.closest("button"); if (!b) return;
+  const code = b.closest(".codebox")?.querySelector("code")?.textContent ?? "";
+  if (b.dataset.fb) {
+    const m = convo[+b.dataset.i]; if (!m) return;
+    const rating = +b.dataset.fb; let note = "";
+    if (rating < 0) { note = prompt("What should it have done differently? (optional - this teaches it)") ?? null; if (note === null) return; }
+    const answer = m.kind === "job" ? (m.data.code || "") : m.content;
+    try {
+      await fetch("/api/feedback", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ category: m.cat, question: m.q, answer, rating, note }) });
+      m.rated = rating; save(); render();
+    } catch {}
+    return;
+  }
+  if (b.hasAttribute("data-copy")) {
+    try { await navigator.clipboard.writeText(code); } catch {
+      const t = document.createElement("textarea"); t.value = code; document.body.appendChild(t); t.select(); document.execCommand("copy"); t.remove();
+    }
+    b.textContent = "Copied"; setTimeout(() => b.textContent = "Copy", 1200);
+  } else if (b.dataset.dl) {
+    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([code], { type: "text/plain" }));
+    a.download = b.dataset.dl; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  } else if (b.dataset.open) {
+    fetch("/api/open-folder", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: b.dataset.open }) });
+  }
+});
+
+/* ---------- elapsed time + ETA ---------- */
+function fmtSec(sec) { sec = Math.max(0, Math.round(sec)); return sec < 60 ? sec + "s" : Math.floor(sec / 60) + "m " + String(sec % 60).padStart(2, "0") + "s"; }
+function etaFor(key) {
+  const hist = store.get("durations", {})[key] || [];
+  if (!hist.length) return null;
+  const recent = hist.slice(-5); return recent.reduce((a, b) => a + b, 0) / recent.length;
+}
+function recordDuration(key, sec) {
+  const all = store.get("durations", {}); (all[key] = all[key] || []).push(Math.round(sec)); all[key] = all[key].slice(-10); store.set("durations", all);
+}
+function timerText(start, key) {
+  const el = (Date.now() - start) / 1000, avg = etaFor(key);
+  let t = `⏱ ${fmtSec(el)} elapsed`;
+  if (avg === null) t += " · ETA: learning (first run)";
+  else if (avg - el > 1) t += ` · about ${fmtSec(avg - el)} left`;
+  else t += " · taking longer than usual";
+  return t;
+}
+
+/* ---------- streaming helper ---------- */
+async function stream(url, body, onEvent) {
+  S.controller = new AbortController();
+  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: S.controller.signal });
+  if (res.status === 401) { showLock(); throw new Error("Locked"); }
+  if (!res.ok) { let msg = "Error " + res.status; try { msg = (await res.json()).error || msg; } catch {} throw new Error(msg); }
+  const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = "";
+  for (;;) {
+    const { value, done } = await reader.read(); if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i; while ((i = buf.indexOf("\n")) > -1) { const line = buf.slice(0, i); buf = buf.slice(i + 1); if (line.trim()) onEvent(JSON.parse(line)); }
+  }
+}
+
+/* ---------- send ---------- */
+const input = $("#input");
+function save() { store.set("convo", convo.slice(-60)); }
+function setBusy(b) {
+  S.busy = b; const sb = $("#sendBtn");
+  sb.classList.toggle("stop", b);
+  sb.innerHTML = b ? '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>'
+                   : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg>';
+  sb.setAttribute("aria-label", b ? "Stop" : "Send");
+}
+async function send() {
+  if (S.busy) return stop();
+  const text = input.value.trim(); if (!text) return;
+  input.value = ""; grow();
+  if (S.mode !== "code") return sendChat(text);
+  return sendCode(text);
+}
+async function sendChat(text) {
+  convo.push({ role: "user", content: text });
+  const bot = { role: "assistant", content: "", q: text, cat: S.mode === "search" ? "search" : "chat", streaming: true }; convo.push(bot); render();
+  const el = msgsEl.lastChild; const bubble = el.querySelector(".bubble");
+  const st = document.createElement("div"); st.className = "status"; st.innerHTML = '<div class="spin"></div><span>Starting...</span>'; el.appendChild(st);
+  setBusy(true);
+  const key = S.mode + "|" + (S.mode === "search" ? settings.search : settings.chat), t0 = Date.now();
+  const tm = document.createElement("div"); tm.className = "meta"; el.appendChild(tm);
+  const tick = setInterval(() => { tm.textContent = timerText(t0, key); }, 500); tm.textContent = timerText(t0, key);
+  const history = convo.filter(m => m.kind !== "job" && m !== bot).map(m => ({ role: m.role, content: m.content })).slice(-20);
+  try {
+    const search = S.mode === "search";
+    const pcFile = S.pcFile; if (pcFile) { bot.file = pcFile.split(/[\\/]/).pop(); S.pcFile = null; clearAttach(); }
+    await stream("/api/chat", { mode: search ? "search" : "daily", model: search ? settings.search : settings.chat,
+                                web: settings.web, messages: history, file_path: pcFile || undefined }, ev => {
+      if (ev.status) st.querySelector("span").textContent = ev.status;
+      if (ev.text) { bot.content += ev.text; bubble.innerHTML = md(bot.content); st.style.display = "none"; scrollDown(); }
+      if (ev.error) bot.error = ev.error;
+      if (ev.checks) bot.checks = ev.checks;
+      if (ev.files) bot.hits = ev.files;
+      if (ev.done) bot.sources = ev.sources;
+    });
+  } catch (e) { if (e.name !== "AbortError") bot.error = e.message; else bot.content += bot.content ? "\n\n_(stopped)_" : "_(stopped)_"; }
+  clearInterval(tick);
+  const took = (Date.now() - t0) / 1000;
+  if (!bot.error && bot.content) recordDuration(key, took);
+  bot.took = took;
+  delete bot.streaming; setBusy(false); save(); render();
+}
+async function sendCode(text) {
+  const file = S.attach; clearAttach();
+  convo.push({ role: "user", content: text, file: file && file.name });
+  const job = { role: "assistant", kind: "job", content: "", q: text, cat: "code", data: { status: "Starting...", log: [], steps: {} } };
+  convo.push(job); render();
+  S.job = Math.random().toString(16).slice(2, 14);
+  setBusy(true);
+  const r = job.data; let lastPaint = 0;
+  const key = "code|" + settings.writer; r.t0 = Date.now(); r.key = key;
+  const tick = setInterval(() => paint(true), 1000);
+  const paint = (force) => { const now = Date.now(); if (!force && now - lastPaint < 250) return; lastPaint = now;
+    const old = msgsEl.lastChild; const open = old.querySelector("details")?.open; const n = jobEl(job); if (open) n.querySelector("details").open = true;
+    msgsEl.replaceChild(n, old); const lg = n.querySelector(".log"); if (lg) lg.scrollTop = lg.scrollHeight; scrollDown(); };
+  try {
+    await stream("/api/code", {
+      task: text, job: S.job, writer: settings.writer, reviewer: settings.reviewer, lang: settings.lang,
+      run: settings.run, web: settings.codeWeb, rounds: settings.rounds,
+      file_name: file && file.name, file_text: file ? file.text : null
+    }, ev => {
+      if (ev.line !== undefined) {
+        r.log.push(ev.line);
+        if (/Researching/.test(ev.line)) r.steps.Research = "on";
+        if (/is (writing|fixing)/.test(ev.line)) { r.steps.Research = r.steps.Research && "pass"; r.steps.Write = "on"; r.steps.Test = ""; }
+        if (/Test run PASSED/.test(ev.line)) { r.steps.Write = "pass"; r.steps.Test = "pass"; }
+        if (/Test run FAILED/.test(ev.line)) { r.steps.Write = "pass"; r.steps.Test = "fail"; }
+        if (/is reviewing/.test(ev.line)) { r.steps.Write = "pass"; r.steps.Review = "on"; }
+        if (/VERDICT:\s*APPROVED/i.test(ev.line)) r.steps.Review = "pass";
+        if (/VERDICT:\s*CHANGES/i.test(ev.line)) r.steps.Review = "fail";
+      }
+      if (ev.status) r.status = ev.status;
+      if (ev.done) Object.assign(r, ev);
+      paint(!!ev.done);
+    });
+  } catch (e) { r.done = true; r.error = e.name === "AbortError" ? "Stopped." : e.message; }
+  clearInterval(tick);
+  r.done = true; r.took = (Date.now() - r.t0) / 1000;
+  if (r.code) recordDuration(key, r.took);
+  setBusy(false); save(); render();
+}
+function stop() {
+  if (S.mode === "code" && S.job) fetch("/api/stop", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ job: S.job }) });
+  if (S.controller) S.controller.abort();
+}
+
+/* ---------- composer ---------- */
+function grow() { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, window.innerHeight * 0.4) + "px"; }
+input.addEventListener("input", grow);
+input.addEventListener("keydown", e => {
+  const touch = matchMedia("(pointer: coarse)").matches;
+  if (e.key === "Enter" && !e.shiftKey && !touch) { e.preventDefault(); send(); }
+});
+$("#sendBtn").onclick = send;
+$("#attachBtn").onclick = () => $("#fileIn").click();
+$("#fileIn").onchange = async e => {
+  const f = e.target.files[0]; e.target.value = ""; if (!f) return;
+  if (f.size > 1_500_000) return alert("That file is too big (max 1.5 MB).");
+  S.attach = { name: f.name, text: await f.text() };
+  $("#pillName").textContent = "📎 " + f.name; $("#pill").style.display = "flex";
+  if (!input.value) input.value = "Clean this up, fix any bugs, and add comments";
+  grow();
+};
+function clearAttach() { S.attach = null; S.pcFile = null; $("#pill").style.display = "none"; }
+$("#pillX").onclick = clearAttach;
+
+/* ---------- mode / new ---------- */
+function setMode(m) {
+  S.mode = m; store.set("mode", m);
+  document.querySelectorAll(".seg button").forEach(b => b.classList.toggle("on", b.dataset.mode === m));
+  document.body.classList.toggle("mode-code", m === "code");
+  $("#sendBtn").classList.toggle("code", m === "code");
+  $("#sendBtn").classList.toggle("search", m === "search");
+  input.placeholder = { chat: "Message your AI...", search: "What should I look up?", code: "Describe the program to build..." }[m];
+  updateHint();
+  if (!convo.length) emptyState();
+}
+function updateHint() {
+  const s = settings;
+  $("#hintL").textContent = S.mode === "chat" ? (s.chat || "") + (s.web ? " · web on" : "")
+    : S.mode === "search" ? `${s.search || ""} · searches the web`
+    : `${s.writer || ""} → ${s.run ? "test" : "no test"} → ${s.reviewer || ""}`;
+  $("#hintR").textContent = matchMedia("(pointer: coarse)").matches ? "" : "Enter to send · Shift+Enter for new line";
+}
+document.querySelectorAll(".seg button").forEach(b => b.onclick = () => setMode(b.dataset.mode));
+$("#newBtn").onclick = () => { if (S.busy) stop(); convo = []; save(); render(); };
+
+/* ---------- settings ---------- */
+function fillSelect(sel, models, val) {
+  const groups = (S.status && S.status.groups) || {};
+  const order = ["Everyday (fast)", "Search & research", "Coding", "Reasoning & debugging", "Other", "Too big for 6 GB (slow)"];
+  sel.innerHTML = order.map(g => {
+    const ms = models.filter(m => (groups[m] || "Other") === g);
+    return ms.length ? `<optgroup label="${esc(g)}">${ms.map(m => `<option ${m === val ? "selected" : ""}>${esc(m)}</option>`).join("")}</optgroup>` : "";
+  }).join("");
+}
+function openSheet() {
+  const models = (S.status && S.status.models) || [];
+  fillSelect($("#sChat"), models, settings.chat); fillSelect($("#sSearch"), models, settings.search); fillSelect($("#sWriter"), models, settings.writer); fillSelect($("#sReviewer"), models, settings.reviewer);
+  $("#sWeb").checked = settings.web; $("#sRun").checked = settings.run; $("#sCodeWeb").checked = settings.codeWeb;
+  $("#sRounds").value = settings.rounds; $("#sLang").value = settings.lang;
+  const L = (S.status && S.status.learning) || { enabled: true, rules: {}, counts: {} };
+  $("#sLearn").checked = L.enabled;
+  $("#rDaily").value = L.rules.daily || ""; $("#rSearch").value = L.rules.search || ""; $("#rCode").value = L.rules.code || "";
+  const c = L.counts || {}; const n = k => c[k] ? c[k].liked + c[k].corrections : 0;
+  $("#learnCounts").textContent = `Saved: Chat ${n("daily")} · Search ${n("search")} · Code ${n("code")} (incl. auto-saved working code)`;
+  if (S.status && S.status.local) {
+    $("#filesSec").style.display = "";
+    fetch("/api/files/settings").then(r => r.json()).then(j => { $("#rRoots").value = (j.roots || []).join("\n"); });
+  }
+  const p = S.status && S.status.phone;
+  $("#phoneSec").style.display = p ? "" : "none";
+  if (p) {
+    const links = [...p.lan.map(u => ["At home (same Wi-Fi)", u]), ...p.tailscale.map(u => ["Anywhere (Tailscale)", u])];
+    $("#phoneBox").innerHTML = `On your phone, open one of these in Safari (iPhone) or Chrome (Android):<br>
+      ${links.map(([k, u]) => `<div style="margin:6px 0">${k}: <code>${esc(u)}</code></div>`).join("") || "<div>No network found.</div>"}
+      PIN:<div class="pin">${esc(p.pin)}</div>
+      Then tap <b>Share → Add to Home Screen</b> (iPhone) or <b>⋮ → Add to Home screen</b> (Android).
+      <div class="row"><button class="btn" id="newPin">Change PIN</button></div>`;
+    $("#newPin").onclick = async () => { const r = await fetch("/api/new-pin", { method: "POST" }); const j = await r.json(); S.status.phone.pin = j.pin; openSheet(); };
+  }
+  $("#sheetBg").style.display = $("#sheet").style.display = "block";
+}
+function closeSheet() {
+  settings.chat = $("#sChat").value || settings.chat; settings.search = $("#sSearch").value || settings.search; settings.writer = $("#sWriter").value || settings.writer;
+  settings.reviewer = $("#sReviewer").value || settings.reviewer; settings.web = $("#sWeb").checked; settings.run = $("#sRun").checked;
+  settings.codeWeb = $("#sCodeWeb").checked; settings.rounds = Math.max(1, Math.min(8, +$("#sRounds").value || 4)); settings.lang = $("#sLang").value;
+  store.set("settings", settings); updateHint();
+  if (S.status && S.status.local && $("#rRoots").value.trim())
+    post("/api/files/settings", { roots: $("#rRoots").value.split("\n") });
+  fetch("/api/learning", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled: $("#sLearn").checked, rules: { daily: $("#rDaily").value, search: $("#rSearch").value, code: $("#rCode").value } }) })
+    .then(r => r.json()).then(j => { if (S.status) S.status.learning = j; }).catch(() => {});
+  const picked = store.get("picked", {});
+  for (const [k, id] of [["chat", "#sChat"], ["search", "#sSearch"], ["writer", "#sWriter"], ["reviewer", "#sReviewer"]])
+    if ($(id).dataset.changed) picked[k] = true;
+  store.set("picked", picked);
+  $("#sheetBg").style.display = $("#sheet").style.display = "none";
+}
+["#sChat", "#sSearch", "#sWriter", "#sReviewer"].forEach(id => $(id).addEventListener("change", e => e.target.dataset.changed = "1"));
+document.querySelectorAll("[data-forget]").forEach(b => b.onclick = async () => {
+  if (!confirm("Forget everything it learned for this mode?")) return;
+  const r = await fetch("/api/learning", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ forget: b.dataset.forget }) });
+  if (S.status) S.status.learning = await r.json(); openSheet();
+});
+$("#setBtn").onclick = openSheet; $("#sDone").onclick = closeSheet; $("#sheetBg").onclick = closeSheet;
+
+/* ---------- lock ---------- */
+function showLock() { $("#lock").style.display = "flex"; setTimeout(() => $("#pinIn").focus(), 50); }
+async function unlock() {
+  $("#pinErr").textContent = "";
+  const r = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pin: $("#pinIn").value }) });
+  if (r.ok) { $("#lock").style.display = "none"; $("#pinIn").value = ""; boot(); }
+  else { let m = "Wrong PIN."; try { m = (await r.json()).error || m; } catch {} $("#pinErr").textContent = m; }
+}
+$("#pinBtn").onclick = unlock;
+$("#pinIn").addEventListener("keydown", e => { if (e.key === "Enter") unlock(); });
+$("#pinIn").addEventListener("input", e => { if (e.target.value.length === 6) unlock(); });
+
+/* ---------- security ---------- */
+let secPoll = null;
+const post = (url, body) => fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) }).then(r => r.json());
+function openSec() { $("#sec").style.display = "flex"; refreshScan(); if (!secPoll) secPoll = setInterval(refreshScan, 1000); }
+function closeSec() { $("#sec").style.display = "none"; clearInterval(secPoll); secPoll = null; }
+$("#secBtn").onclick = openSec; $("#secClose").onclick = closeSec;
+document.querySelectorAll("[data-st]").forEach(b => b.onclick = () => {
+  document.querySelectorAll("[data-st]").forEach(x => x.classList.toggle("on", x === b));
+  $("#secScan").style.display = b.dataset.st === "scan" ? "" : "none";
+  $("#secQ").style.display = b.dataset.st === "q" ? "" : "none";
+  if (b.dataset.st === "q") loadQuarantine();
+});
+const aiNotes = {}, actMsg = {};
+let lastScanKey = "";
+async function refreshScan() {
+  let st; try { st = await fetch("/api/scan/status").then(r => r.json()); } catch { return; }
+  if (st.error === "locked") return showLock();
+  $("#scanStop").style.display = st.running ? "" : "none";
+  $("#scanQuick").disabled = $("#scanFull").disabled = st.running;
+  let prog = "";
+  if (st.running) {
+    const pct = st.total ? Math.round(100 * st.done / st.total) : 0;
+    prog = `<div class="status"><div class="spin"></div><span>${esc(st.phase)} ${st.total ? `(${st.done} of ${st.total})` : ""}</span></div>
+      <div class="bar"><div style="width:${pct}%"></div></div>
+      <div class="meta">⏱ ${fmtSec(st.elapsed || 0)} elapsed · ${st.eta != null ? "about " + fmtSec(st.eta) + " left" : "estimating..."}</div>`;
+  } else if (st.started) {
+    const n = st.findings.length, hi = st.findings.filter(f => f.level === "high").length;
+    prog = `<div class="badge ${hi ? "warn" : "ok"}">${st.error ? "⚠ " + esc(st.error) : hi ? `⚠ ${hi} high-risk item${hi > 1 ? "s" : ""} found` : n ? "✓ Nothing high-risk found" : "✓ No threats found"}</div>
+      <div class="meta">${esc(st.mode)} scan · ${st.scanned} items checked · ${fmtSec(st.elapsed || 0)}${st.phase === "Stopped" ? " · stopped early" : ""}</div>`;
+  }
+  $("#scanProg").innerHTML = prog;
+  const key = JSON.stringify(st.findings.map(f => [f.id, f.score, f.quarantined, f.disabled])) + JSON.stringify(aiNotes) + JSON.stringify(actMsg) + st.can_act;
+  if (key === lastScanKey) return; lastScanKey = key;
+  $("#scanList").innerHTML = st.findings.map(f => {
+    const nm = (f.path || f.entry || "").split(/[\\/]/).pop() || f.entry;
+    const where = f.kind === "startup" ? "Starts with Windows · " + (f.where || "") : f.kind === "process" ? "Running now" : "File";
+    const acts = st.can_act ? `${f.path && !f.quarantined ? `<button class="btn" data-act="quarantine" data-id="${f.id}">Quarantine</button>` : ""}
+       ${f.kind === "startup" && !f.disabled ? `<button class="btn" data-act="disable" data-id="${f.id}">Stop it starting</button>` : ""}
+       <button class="btn" data-act="trust" data-id="${f.id}">It's safe</button>` : `<span class="meta">Remove/restore from the PC</span>`;
+    const ai = aiNotes[f.id];
+    return `<div class="find"><div class="top"><span class="lvl ${f.level}">${f.level}</span><span class="name">${esc(nm)}</span></div>
+      <div class="path">${esc(where)}${f.path ? " · " + esc(f.path) : ""}</div>
+      ${f.command && f.kind !== "file" ? `<div class="path">Command: ${esc(f.command.slice(0, 300))}</div>` : ""}
+      <ul>${f.reasons.slice(0, 4).map(r => `<li>${esc(r)}</li>`).join("")}</ul>
+      ${f.quarantined ? '<div class="ok-msg">In quarantine - it can no longer run.</div>' : ""}${f.disabled ? '<div class="ok-msg">Won\'t start with Windows any more.</div>' : ""}
+      ${actMsg[f.id] ? `<div class="${actMsg[f.id].ok ? "ok-msg" : "bad-msg"}">${esc(actMsg[f.id].text)}</div>` : ""}
+      <div class="row"><button class="btn primary" data-ask="${f.id}">Ask AI</button>${acts}</div>
+      ${ai ? `<div class="ai md">${ai.status && !ai.text ? `<div class="status"><div class="spin"></div><span>${esc(ai.status)}</span></div>` : ""}${md(ai.text || "")}
+        ${ai.facts ? `<details><summary>What the investigation found</summary><div class="log">${esc(JSON.stringify(ai.facts, null, 1))}</div></details>` : ""}</div>` : ""}
+    </div>`;
+  }).join("") || (st.started && !st.running ? '<div class="note">Nothing suspicious to show. 🎉</div>' : "");
+}
+$("#scanQuick").onclick = () => post("/api/scan/start", { mode: "quick" }).then(refreshScan);
+$("#scanFull").onclick = () => post("/api/scan/start", { mode: "full" }).then(refreshScan);
+$("#scanStop").onclick = () => post("/api/scan/stop");
+$("#scanUpdate").onclick = async () => {
+  const b = $("#scanUpdate"); b.textContent = "Downloading..."; b.disabled = true;
+  const r = await post("/api/scan/update-list");
+  b.textContent = r.ok ? `Updated (${r.total.toLocaleString()} known threats)` : "Update failed"; b.disabled = false;
+  if (!r.ok) alert(r.error);
+};
+$("#scanList").addEventListener("click", async e => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.dataset.act) {
+    if (b.dataset.act === "quarantine" && !confirm("Move this to quarantine? If it's running it will be closed first. You can restore it later.")) return;
+    b.disabled = true;
+    const r = await post("/api/scan/action", { id: b.dataset.id, action: b.dataset.act });
+    actMsg[b.dataset.id] = { ok: !!r.ok, text: r.message || r.error };
+    lastScanKey = ""; refreshScan();
+  } else if (b.dataset.ask) {
+    const id = b.dataset.ask; const note = aiNotes[id] = { status: "Starting...", text: "" };
+    lastScanKey = ""; refreshScan();
+    try {
+      await stream("/api/scan/explain", { id }, ev => {
+        if (ev.status) note.status = ev.status;
+        if (ev.facts) note.facts = ev.facts;
+        if (ev.text) note.text += ev.text;
+        if (ev.error) note.text += "\n\n_" + ev.error + "_";
+        lastScanKey = ""; refreshScan();
+      });
+    } catch (err) { note.text += "\n\n_" + err.message + "_"; }
+    note.status = ""; lastScanKey = ""; refreshScan();
+  }
+});
+async function loadQuarantine() {
+  const q = await fetch("/api/scan/quarantine").then(r => r.json());
+  const items = q.quarantined.map(x => `<div class="find"><div class="name">${esc(x.original.split(/[\\/]/).pop())}</div>
+      <div class="path">${esc(x.original)} · quarantined ${esc(x.time)}</div><ul>${(x.reasons || []).map(r => `<li>${esc(r)}</li>`).join("")}</ul>
+      <div class="row"><button class="btn" data-qid="${x.qid}">Restore</button></div></div>`).join("");
+  const dis = q.disabled.map(x => `<div class="find"><div class="name">${esc(x.name)}</div>
+      <div class="path">${esc(x.where)} · stopped ${esc(x.time)}</div><div class="path">${esc((x.command || "").slice(0, 200))}</div>
+      <div class="row"><button class="btn" data-did="${x.did}">Let it start again</button></div></div>`).join("");
+  $("#secQ").innerHTML = `<h4 style="margin:4px 0 8px">Quarantined files</h4>${items || '<div class="note">None.</div>'}
+    <h4 style="margin:16px 0 8px">Stopped from starting</h4>${dis || '<div class="note">None.</div>'}`;
+}
+$("#secQ").addEventListener("click", async e => {
+  const b = e.target.closest("button"); if (!b) return;
+  const r = await post("/api/scan/restore", b.dataset.qid ? { qid: b.dataset.qid } : { did: b.dataset.did });
+  if (!r.ok) alert(r.error); loadQuarantine();
+});
+
+/* ---------- files ---------- */
+const FL = { path: null, parent: null, sel: null };
+const fmtSize = n => n == null ? "" : n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(0) + " KB" : n < 1073741824 ? (n / 1048576).toFixed(1) + " MB" : (n / 1073741824).toFixed(2) + " GB";
+const fileIcon = e => e.dir ? "📁" : /\.(jpe?g|png|gif|webp|heic)$/i.test(e.name) ? "🖼️" : /\.(mp4|mkv|avi|mov)$/i.test(e.name) ? "🎬" : /\.(mp3|wav|flac|m4a)$/i.test(e.name) ? "🎵" : /\.(py|js|html|css|json|bat|ps1|cpp|c|cs|dart)$/i.test(e.name) ? "📜" : "📄";
+async function getJSON(url) { const r = await fetch(url); if (r.status === 401) { showLock(); throw new Error("Locked"); } return r.json(); }
+function rowHTML(e) {
+  return `<div class="fl-row" data-path="${esc(e.path)}" data-dir="${e.dir ? 1 : ""}"><span class="ic">${fileIcon(e)}</span><span class="nm">${esc(e.name)}</span>
+    <span class="mt">${e.dir ? "" : fmtSize(e.size) + "<br>"}${esc(e.modified || "")}</span></div>`;
+}
+async function flOpen(path) {
+  FL.sel = null;
+  const j = await getJSON("/api/files/list" + (path ? "?path=" + encodeURIComponent(path) : ""));
+  if (j.error) { $("#flList").innerHTML = `<div class="bad-msg">${esc(j.error)}</div>`; return; }
+  FL.path = j.path; FL.parent = j.parent;
+  $("#flCrumb").textContent = j.path || "Shared folders";
+  $("#flList").innerHTML = `<div class="fl">${j.entries.map(rowHTML).join("") || '<div class="fl-row">Empty folder</div>'}</div>`;
+}
+async function flSearch(q) {
+  if (!q.trim()) return flOpen(FL.path);
+  $("#flCrumb").textContent = `Results for "${q}"`;
+  const j = await getJSON("/api/files/search?q=" + encodeURIComponent(q));
+  $("#flList").innerHTML = `<div class="fl">${(j.results || []).map(rowHTML).join("") || '<div class="fl-row">No matches</div>'}</div>`;
+}
+function flActions(row) {
+  document.querySelectorAll(".fl-acts").forEach(x => x.remove());
+  document.querySelectorAll(".fl-row.sel").forEach(x => x.classList.remove("sel"));
+  row.classList.add("sel");
+  const p = row.dataset.path, local = S.status && S.status.local;
+  const box = document.createElement("div"); box.className = "fl-acts";
+  box.innerHTML = `<div class="row" style="margin-top:0">
+      <button class="btn" data-fa="preview">Preview</button>
+      <button class="btn primary" data-fa="ask">Ask AI about it</button>
+      <button class="btn" data-fa="download">Download</button>
+      ${local ? '<button class="btn" data-fa="show">Show in folder</button>' : ""}
+      <button class="btn" data-fa="delete" style="color:var(--bad)">Delete</button></div><div class="pv"></div>`;
+  box.dataset.path = p; row.after(box);
+}
+function openFiles() { $("#filesPanel").style.display = "flex"; if (FL.path === null && !$("#flList").innerHTML) flOpen(null); }
+$("#filesBtn").onclick = openFiles;
+$("#filesClose").onclick = () => { $("#filesPanel").style.display = "none"; };
+$("#flUp").onclick = () => flOpen(FL.parent);
+let flT; $("#flSearch").addEventListener("input", e => { clearTimeout(flT); flT = setTimeout(() => flSearch(e.target.value), 350); });
+$("#flList").addEventListener("click", async e => {
+  const act = e.target.closest("[data-fa]");
+  if (act) {
+    const box = act.closest(".fl-acts"), p = box.dataset.path;
+    if (act.dataset.fa === "preview") {
+      box.querySelector(".pv").innerHTML = '<div class="status"><div class="spin"></div><span>Loading...</span></div>';
+      const j = await getJSON("/api/files/read?path=" + encodeURIComponent(p));
+      box.querySelector(".pv").innerHTML = j.error ? `<div class="bad-msg">${esc(j.error)}</div>` : j.text ? `<div class="preview">${esc(j.text.slice(0, 60000))}</div>` : `<div class="note">${esc(j.note || "No preview.")}</div>`;
+    } else if (act.dataset.fa === "ask") {
+      attachPcFile(p);
+    } else if (act.dataset.fa === "download") {
+      // A short-lived link works in the phone app too (it hands the download to the phone's browser).
+      const j = await getJSON("/api/files/link?path=" + encodeURIComponent(p));
+      if (j.error) return alert(j.error);
+      const a = document.createElement("a"); a.href = j.url; a.download = j.name; document.body.appendChild(a); a.click(); a.remove();
+    } else if (act.dataset.fa === "show") {
+      post("/api/files/open", { path: p });
+    } else if (act.dataset.fa === "delete") {
+      const name = p.split(/[\\/]/).pop();
+      box.querySelector(".pv").innerHTML = `<div class="row"><input type="password" inputmode="numeric" maxlength="6" placeholder="PIN" class="delpin"
+          style="width:120px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px;font-size:16px">
+        <button class="btn" data-fa="confirmdel" style="background:var(--bad);color:#fff;border-color:transparent">Move "${esc(name)}" to Recycle Bin</button>
+        <button class="btn" data-fa="canceldel">Cancel</button></div>`;
+      box.querySelector(".delpin").focus();
+    } else if (act.dataset.fa === "canceldel") {
+      box.querySelector(".pv").innerHTML = "";
+    } else if (act.dataset.fa === "confirmdel") {
+      const pin = box.querySelector(".delpin").value;
+      const r = await post("/api/files/delete", { path: p, pin });
+      if (r.ok) { box.previousElementSibling && box.previousElementSibling.remove(); box.outerHTML = `<div class="fl-acts"><div class="ok-msg">${esc(r.message)}</div></div>`; }
+      else box.querySelector(".pv").insertAdjacentHTML("beforeend", `<div class="bad-msg">${esc(r.error)}</div>`);
+    }
+    return;
+  }
+  const row = e.target.closest(".fl-row"); if (!row || !row.dataset.path) return;
+  if (row.dataset.dir) flOpen(row.dataset.path); else flActions(row);
+});
+$("#flUpload").onclick = () => $("#flUploadIn").click();
+$("#flUploadIn").onchange = async e => {
+  const list = [...e.target.files]; e.target.value = "";
+  for (const f of list) {
+    $("#flCrumb").textContent = `Uploading ${f.name} (${fmtSize(f.size)})...`;
+    const r = await fetch("/api/files/upload", { method: "POST", headers: { "X-Filename": encodeURIComponent(f.name) }, body: f }).then(r => r.json()).catch(err => ({ error: err.message }));
+    $("#flCrumb").textContent = r.ok ? `Saved to ${r.saved_to}` : `Upload failed: ${r.error}`;
+  }
+};
+function attachPcFile(p) {
+  S.pcFile = p; S.attach = null;
+  $("#pillName").textContent = "📎 " + p.split(/[\\/]/).pop() + " (from PC)"; $("#pill").style.display = "flex";
+  $("#filesPanel").style.display = "none"; setMode("chat");
+  if (!input.value) input.value = "Summarize this file and tell me anything important in it."; grow(); input.focus();
+}
+/* clickable file results inside chat answers */
+msgsEl.addEventListener("click", e => {
+  const row = e.target.closest(".hits .fl-row"); if (!row) return;
+  openFiles(); flOpen(row.dataset.path.replace(/[\\/][^\\/]*$/, "")).then(() => {
+    const r = [...document.querySelectorAll("#flList .fl-row")].find(x => x.dataset.path === row.dataset.path); if (r) { flActions(r); r.scrollIntoView({ block: "center" }); }
+  });
+});
+
+/* ---------- boot ---------- */
+async function boot() {
+  try {
+    const r = await fetch("/api/status"); S.status = await r.json();
+  } catch { msgsEl.innerHTML = '<div class="empty"><h2>Can\'t reach your PC</h2><div>Make sure Local AI is running on your PC and you\'re on the same Wi-Fi (or Tailscale).</div></div>'; return; }
+  if (!S.status.authed) return showLock();
+  const models = S.status.models;
+  const ok = m => models.includes(m);
+  const d = S.status.defaults || {};
+  // Use the recommended model for each category unless the user picked one themselves.
+  const picked = store.get("picked", {});
+  for (const [k, cat] of [["chat", "daily"], ["search", "search"], ["writer", "writer"], ["reviewer", "reviewer"]])
+    if (!ok(settings[k]) || !picked[k]) settings[k] = d[cat] || models[0] || "";
+  store.set("settings", settings);
+  setMode(S.mode); render();
+  if (S.status.ollama_error) {
+    const b = document.createElement("div"); b.className = "banner"; b.textContent = S.status.ollama_error; msgsEl.prepend(b);
+  }
+}
+setMode(S.mode); boot();
+</script>
+</body>
+</html>
