@@ -62,7 +62,7 @@ jobs:
           channel: stable
           cache: true
       - name: Create Android project files
-        run: flutter create --platforms android --org com.rashestlynx --project-name local_ai .
+        run: flutter create --platforms android,ios --org com.rashestlynx --project-name local_ai .
       - run: python3 tool/patch_platforms.py
       - run: flutter pub get
       - run: dart run flutter_launcher_icons
@@ -94,7 +94,7 @@ jobs:
           channel: stable
           cache: true
       - name: Create iOS project files
-        run: flutter create --platforms ios --org com.rashestlynx --project-name local_ai .
+        run: flutter create --platforms android,ios --org com.rashestlynx --project-name local_ai .
       - run: python3 tool/patch_platforms.py
       - run: flutter pub get
       - run: dart run flutter_launcher_icons
