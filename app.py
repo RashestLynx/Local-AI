@@ -41,10 +41,12 @@ sys.path.insert(0, str(HERE))
 import coder_team as ct  # noqa: E402  (reuses Ollama + web search helpers)
 import scanner  # noqa: E402  (our own malware finder)
 import pcinfo  # noqa: E402  (read-only PC diagnostics the AI can use)
+import debloat  # noqa: E402  (Windows app cleanup / debloat)
 import files  # noqa: E402  (safe, read-only access to your folders)
 import urllib.parse  # noqa: E402
 
 SCAN = scanner.Scanner(HERE)
+CLEAN = debloat.Debloat(HERE)
 
 SECURITY_SYSTEM = """You are a calm, practical computer-security assistant. The user's own malware scanner flagged
 an item on their Windows PC. Using ONLY the facts provided, explain in plain English:
@@ -55,7 +57,7 @@ Be honest about uncertainty. Never tell the user to run commands or download "re
 
 PERF_WORDS = re.compile(r"\b(slow|lag|speed|fast|gpu|vram|ram|memory|cpu|temperature|hot|fan|performance|fps|freez)", re.I)
 
-APP_VERSION = "3.6"
+APP_VERSION = "3.7"
 RESTARTING = False
 CONFIG_PATH = HERE / "app-config.json"
 OUTPUT_DIR = HERE / "output"
@@ -410,6 +412,10 @@ class Handler(BaseHTTPRequestHandler):
             for f in st["findings"]:
                 f.pop("startup", None)
             return self.send_json(st)
+        if path == "/api/cleanup/status":
+            if not self.authed():
+                return self.send_json({"error": "locked"}, 401)
+            return self.send_json(dict(CLEAN.status(), local=self.is_local()))
         if path == "/api/scan/quarantine":
             if not self.authed():
                 return self.send_json({"error": "locked"}, 401)
@@ -464,17 +470,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"ok": True, "saved_to": dest})
             if path == "/api/files/delete":
                 req = self.read_json()
-                ip = self.client_address[0]
-                count, first = FAILED_PINS.get(ip, (0, time.time()))
-                if time.time() - first > 600:
-                    count, first = 0, time.time()
-                if count >= 5:
-                    return self.send_json({"error": "Too many wrong PINs. Wait 10 minutes."}, 429)
-                if not secrets.compare_digest(str(req.get("pin", "")).strip(), CFG["pin"]):
-                    FAILED_PINS[ip] = (count + 1, first)
-                    time.sleep(1)
-                    return self.send_json({"error": "Wrong PIN - nothing was deleted."}, 403)
-                FAILED_PINS.pop(ip, None)
+                bad = self.pin_problem(req, "Wrong PIN - nothing was deleted.")
+                if bad:
+                    return bad
                 try:
                     gone = files.to_recycle_bin(CFG, req.get("path"))
                 except PermissionError as e:
@@ -501,6 +499,22 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"ok": True, "roots": [str(r) for r in files.roots(CFG)]})
             if path.startswith("/api/scan/"):
                 return self.scan_route(path)
+            if path == "/api/cleanup/scan":
+                ok = CLEAN.scan()
+                return self.send_json({"ok": ok, "error": None if ok else "Cleanup is already running."})
+            if path == "/api/cleanup/stop":
+                CLEAN.stop()
+                return self.send_json({"ok": True})
+            if path == "/api/cleanup/remove":
+                req = self.read_json()
+                bad = self.pin_problem(req, "Wrong PIN - nothing was removed.")
+                if bad:
+                    return bad
+                keys = [str(k) for k in req.get("keys", [])][:200]
+                r = CLEAN.remove(keys, self.is_local())
+                if r.get("ok"):
+                    print(f"App cleanup started (PIN confirmed): {len(keys)} item(s)")
+                return self.send_json(r)
             if path == "/api/feedback":
                 req = self.read_json()
                 cat = {"chat": "daily", "daily": "daily", "search": "search", "code": "code"}.get(req.get("category"))
@@ -592,6 +606,21 @@ class Handler(BaseHTTPRequestHandler):
                     self.wfile.write(chunk)
             return
         return self.send_json({"error": "not found"}, 404)
+
+    def pin_problem(self, req, wrong_msg):
+        """Checks the PIN in a request (5 tries per 10 minutes). Returns an error response, or None if OK."""
+        ip = self.client_address[0]
+        count, first = FAILED_PINS.get(ip, (0, time.time()))
+        if time.time() - first > 600:
+            count, first = 0, time.time()
+        if count >= 5:
+            return self.send_json({"error": "Too many wrong PINs. Wait 10 minutes."}, 429) or True
+        if not secrets.compare_digest(str(req.get("pin", "")).strip(), CFG["pin"]):
+            FAILED_PINS[ip] = (count + 1, first)
+            time.sleep(1)
+            return self.send_json({"error": wrong_msg}, 403) or True
+        FAILED_PINS.pop(ip, None)
+        return None
 
     def scan_route(self, path):
         req = self.read_json()
@@ -707,6 +736,17 @@ class Handler(BaseHTTPRequestHandler):
                        "\n\nLIVE DIAGNOSTICS FROM THE USER'S PC (just measured - base your answer on these facts, "
                        "name the specific programs/numbers, and suggest concrete fixes. 'diagtool_*' entries come from the user's own "
                        "Diag-Tool - prefer its fix steps):\n" + json.dumps(facts, default=str)[:7000])
+        if (mode == "daily" and history and debloat.CLEANUP_QUESTION.search(history[-1]["content"])
+                and os.name == "nt"):  # read-only app list, fine from the phone too
+            self.emit({"status": "Checking which apps are installed and when you last used them..."})
+            apps = CLEAN.scan_blocking(progress=lambda ph: self.emit({"status": f"{ph}..."}))
+            self.emit({"cleanup": True})
+            system += ("\n\nTHE USER WANTS TO CLEAN UP / DEBLOAT WINDOWS. You cannot remove anything yourself. The app shows an "
+                       "'Open Cleanup' button: there they tick apps and enter their PIN to remove them (protected system parts "
+                       "are never removed). Recommend specific apps from the SUGGESTED list below (biggest and never-used first), "
+                       "say briefly what each is, warn about anything they might still want (e.g. games, Xbox, Office), "
+                       "and mention the settings that can be turned off. Be concise; use a short list.\n\nINSTALLED APPS ON "
+                       "THE USER'S PC (from the user's own cleanup tool):\n" + CLEAN.summary_for_ai(apps)[:7000])
         if req.get("file_path"):  # "Ask AI about this file"
             try:
                 doc = files.read_text(CFG, req["file_path"])

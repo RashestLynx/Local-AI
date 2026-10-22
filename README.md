@@ -8,6 +8,7 @@ A private AI assistant that runs **entirely on your own PC** with [Ollama](https
 - **Learns**: thumbs up/down and your own rules for each mode are fed back into future answers.
 - **Knows your PC**: asks Windows (and the bundled [Diag-Tool](https://github.com/RashestLynx/Diag-Tool)) about your CPU, GPU, disks, battery, temperatures and errors when your question needs it.
 - **Files**: browse, search, preview and ask about files in the folders you share. Deleting needs your PIN and only moves files to the Recycle Bin.
+- **Cleanup (debloat)**: lists every installed app with when you last opened it, suggests what you never use (plus Windows extras like News, Tips, Widgets, Phone Link), and removes what you pick after you enter your PIN. It can also turn off Start-menu ads, Bing in Start search and background apps. Drivers, Windows parts, game launchers, Ollama, Python and the like are protected. Ask in chat ("what apps can I remove?") or open Security → Cleanup.
 - **Security**: its own malware scanner (startup items, running programs, file heuristics, signatures, Microsoft Defender, abuse.ch threat list) with quarantine and restore.
 - **Phone**: PIN-protected access from iPhone and Android on home Wi-Fi, or anywhere through [Tailscale](https://tailscale.com).
 
@@ -42,7 +43,7 @@ The apps are built by GitHub Actions from [`mobile/`](mobile) (Flutter) on every
 ## Other tools
 
 - `coder_team.py`: command-line version of the coding team (`py coder_team.py "task"`).
-- `tools/pc-cleanup/`: uninstalls apps you list in `remove-list.json` (copy the example). It refuses to remove protected system components.
+- `tools/pc-cleanup/`: the debloat script behind the Cleanup tab. You can also run it by itself: list apps in `remove-list.json` (copy the example) and double-click `Clean up apps.bat`.
 
 ## Privacy
 

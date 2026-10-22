@@ -6,9 +6,18 @@
 # Protected (never removed): drivers, Windows components, Armoury Crate, Steam, Ollama, Python, Git,
 # runtimes (.NET, Visual C++), and anything Microsoft marks as non-removable.
 
+#
+# Local AI runs it with: -List <json> -Out <json> -NoPause [-ScanOnly] [-SkipScan]
+# and reads the "PROGRESS|percent|text" lines it prints.
+param([string]$List = "", [string]$Out = "", [switch]$NoPause, [switch]$ScanOnly, [switch]$SkipScan)
+
 $ErrorActionPreference = "Continue"
 $Here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Log = Join-Path $Here "cleanup-log.txt"
+function Prog($pct, $activity, $status) {
+    Write-Progress -Activity $activity -Status $status -PercentComplete $pct
+    if ($NoPause) { Write-Host "PROGRESS|$pct|$activity - $status" }
+}
 $Start = Get-Date
 function Log($m) { $line = "$(Get-Date -Format 'HH:mm:ss')  $m"; Write-Host $line; Add-Content $Log $line }
 function Fmt($ts) { if ($ts.TotalHours -ge 1) { "{0:h\:mm\:ss}" -f $ts } else { "{0:m\:ss}" -f $ts } }
@@ -25,9 +34,9 @@ function IsProtected($name) {
 Add-Content $Log "`n===== Cleanup started $Start ====="
 
 # ------------------------------------------------------------------ 1. remove listed apps
-$listPath = Join-Path $Here "remove-list.json"
+$listPath = if ($List) { $List } else { Join-Path $Here "remove-list.json" }
 $items = @()
-if (Test-Path $listPath) {
+if (-not $ScanOnly -and (Test-Path $listPath)) {
     # Windows PowerShell 5 hands back the whole JSON list as ONE object; piping it through
     # ForEach-Object splits it into separate items.
     $parsed = ConvertFrom-Json (Get-Content $listPath -Raw)
@@ -41,9 +50,9 @@ foreach ($it in $items) {
     $elapsed = (Get-Date) - $removeStart
     $eta = if ($done -gt 1) { [TimeSpan]::FromSeconds($elapsed.TotalSeconds / ($done - 1) * ($total - $done + 1)) } else { $null }
     $etaText = if ($eta) { "about $(Fmt $eta) left" } else { "estimating..." }
-    Write-Progress -Activity "Removing apps ($done of $total)" -Status "$($it.name)  |  elapsed $(Fmt ((Get-Date) - $Start))  |  $etaText" -PercentComplete ([int](100 * ($done - 1) / [math]::Max($total, 1)))
+    Prog ([int](100 * ($done - 1) / [math]::Max($total, 1))) "Removing apps ($done of $total)" "$($it.name)"
     Log "[$done/$total] Removing $($it.name)  (elapsed $(Fmt ((Get-Date) - $Start)), $etaText)"
-    if ($it.kind -ne "special" -and (IsProtected $it.name)) { Log "   skipped - protected"; continue }
+    if ($it.kind -in @("appx", "winget", "uninstall") -and (IsProtected $it.name)) { Log "   skipped - protected"; continue }
     try {
         switch ($it.kind) {
             "appx" {
@@ -83,6 +92,36 @@ foreach ($it in $items) {
                 Get-Process msedge -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowHandle -eq 0 } | Stop-Process -Force -ErrorAction SilentlyContinue
                 Log "   Edge will no longer start with Windows or run in the background"
             }
+            "tweak" {
+                # Small, reversible settings (current user only).
+                switch ($it.id) {
+                    "ads-off" {
+                        $cdm = "HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager"
+                        foreach ($v in "SystemPaneSuggestionsEnabled","SubscribedContent-338388Enabled","SubscribedContent-338389Enabled",
+                                       "SubscribedContent-353694Enabled","SubscribedContent-353696Enabled","SoftLandingEnabled",
+                                       "SilentInstalledAppsEnabled","PreInstalledAppsEnabled","OemPreInstalledAppsEnabled") {
+                            Set-ItemProperty $cdm -Name $v -Value 0 -Type DWord -ErrorAction SilentlyContinue
+                        }
+                        $adv = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
+                        Set-ItemProperty $adv -Name Start_IrisRecommendations -Value 0 -Type DWord -ErrorAction SilentlyContinue
+                        Set-ItemProperty $adv -Name ShowSyncProviderNotifications -Value 0 -Type DWord -ErrorAction SilentlyContinue
+                        Log "   Start menu suggestions, tips and auto-installed promo apps turned off"
+                    }
+                    "bing-search-off" {
+                        $pol = "HKCU:\Software\Policies\Microsoft\Windows\Explorer"
+                        New-Item $pol -Force | Out-Null
+                        Set-ItemProperty $pol -Name DisableSearchBoxSuggestions -Value 1 -Type DWord
+                        Log "   Start menu search will only search your PC (no Bing web results)"
+                    }
+                    "background-apps-off" {
+                        $ba = "HKCU:\Software\Microsoft\Windows\CurrentVersion\BackgroundAccessApplications"
+                        New-Item $ba -Force | Out-Null
+                        Set-ItemProperty $ba -Name GlobalUserDisabled -Value 1 -Type DWord
+                        Log "   Store apps can no longer run in the background"
+                    }
+                    default { Log "   unknown setting" }
+                }
+            }
             "uninstall" {
                 $cmd = $it.command
                 if (-not $cmd) { Log "   no uninstaller found"; break }
@@ -95,10 +134,14 @@ foreach ($it in $items) {
     } catch { Log "   failed: $($_.Exception.Message)" }
 }
 if ($total -gt 0) { Write-Progress -Activity "Removing apps" -Completed; Log "Removal finished in $(Fmt ((Get-Date) - $removeStart))." }
-if (Test-Path $listPath) { Rename-Item $listPath "remove-list.done.json" -Force -ErrorAction SilentlyContinue }
+if (-not $ScanOnly -and (Test-Path $listPath)) {
+    if ($List) { Remove-Item $listPath -Force -ErrorAction SilentlyContinue }
+    else { Rename-Item $listPath "remove-list.done.json" -Force -ErrorAction SilentlyContinue }
+}
+if ($SkipScan) { exit 0 }
 
 # ------------------------------------------------------------------ 2. when was each app last opened?
-Write-Progress -Activity "Scanning installed apps" -Status "Reading usage history...  elapsed $(Fmt ((Get-Date) - $Start))" -PercentComplete 5
+Prog 5 "Scanning installed apps" "Reading usage history..."
 function Rot13($s) { -join ($s.ToCharArray() | ForEach-Object {
     $c = [int]$_
     if ($c -ge 65 -and $c -le 90) { [char](65 + (($c - 65 + 13) % 26)) }
@@ -147,7 +190,7 @@ $seen = @{}
 $i = 0; $n = @($regItems).Count
 foreach ($a in $regItems) {
     $i++
-    if ($i % 20 -eq 0) { Write-Progress -Activity "Scanning installed apps" -Status "Programs $i of $n  |  elapsed $(Fmt ((Get-Date) - $Start))" -PercentComplete ([int](10 + 60 * $i / [math]::Max($n, 1))) }
+    if ($i % 20 -eq 0) { Prog ([int](10 + 60 * $i / [math]::Max($n, 1))) "Scanning installed apps" "Programs $i of $n" }
     if (-not $a.DisplayName -or $a.SystemComponent -eq 1 -or $a.ParentKeyName -or $a.ReleaseType -match "Update|Hotfix") { continue }
     if ($seen.ContainsKey($a.DisplayName)) { continue }
     $seen[$a.DisplayName] = 1
@@ -166,7 +209,7 @@ $pk = @(Get-AppxPackage -PackageTypeFilter Main -ErrorAction SilentlyContinue | 
 $i = 0
 foreach ($p in $pk) {
     $i++
-    if ($i % 10 -eq 0) { Write-Progress -Activity "Scanning installed apps" -Status "Store apps $i of $($pk.Count)  |  elapsed $(Fmt ((Get-Date) - $Start))" -PercentComplete ([int](70 + 28 * $i / [math]::Max($pk.Count, 1))) }
+    if ($i % 10 -eq 0) { Prog ([int](70 + 28 * $i / [math]::Max($pk.Count, 1))) "Scanning installed apps" "Store apps $i of $($pk.Count)" }
     $display = $p.Name
     try { $m = (Get-AppxPackageManifest $p -ErrorAction Stop).Package.Properties.DisplayName; if ($m -and $m -notmatch '^ms-resource') { $display = $m } } catch {}
     $u = LastUse $null $p.PackageFamilyName
@@ -178,9 +221,12 @@ foreach ($p in $pk) {
         command = $null; protected = (IsProtected $display) -or (IsProtected $p.Name)
     })
 }
-$apps | Sort-Object name | ConvertTo-Json -Depth 3 | Set-Content (Join-Path $Here "installed-apps.json") -Encoding UTF8
+$outPath = if ($Out) { $Out } else { Join-Path $Here "installed-apps.json" }
+$apps | Sort-Object name | ConvertTo-Json -Depth 3 | Set-Content $outPath -Encoding UTF8
 Write-Progress -Activity "Scanning installed apps" -Completed
 $never = @($apps | Where-Object { -not $_.last_used -and -not $_.protected }).Count
 Log "Scan finished: $($apps.Count) apps found, $never never opened (not counting protected ones). Total time $(Fmt ((Get-Date) - $Start))."
-Write-Host "`nDone. Tell Claude it finished - it will show you the list of apps you never use before removing anything else." -ForegroundColor Green
-Read-Host "Press Enter to close"
+if (-not $NoPause) {
+    Write-Host "`nDone. The list of installed apps is in installed-apps.json (Local AI shows it under Security > Cleanup)." -ForegroundColor Green
+    Read-Host "Press Enter to close"
+}

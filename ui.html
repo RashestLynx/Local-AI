@@ -156,6 +156,13 @@
   .find .path { font: 12px var(--mono); color: var(--muted); overflow-wrap: anywhere; margin: 4px 0; }
   .find ul { margin: 6px 0 0; padding-left: 18px; font-size: 13.5px; }
   .find .ai { margin-top: 8px; background: var(--panel2); border-radius: 10px; padding: 10px; font-size: 14px; }
+  .cl-row { display: flex; gap: 10px; align-items: flex-start; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+  .cl-row:last-child { border-bottom: 0; } .cl-row input { margin-top: 3px; width: 18px; height: 18px; flex: none; }
+  .cl-row .nm { flex: 1; min-width: 0; overflow-wrap: anywhere; } .cl-row .why { font-size: 12.5px; color: var(--muted); }
+  .cl-row .mt { font-size: 12px; color: var(--muted); flex: none; text-align: right; }
+  .cl-row.prot { opacity: .5; }
+  .cl-sum { position: sticky; bottom: 0; background: var(--bg); padding: 10px 0; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .cl-sum input { width: 110px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 7px 10px; font-size: 16px; }
   .note { font-size: 13px; color: var(--muted); margin: 6px 0 12px; }
   .ok-msg { color: var(--ok); font-size: 13px; margin-top: 6px; } .bad-msg { color: var(--bad); font-size: 13px; margin-top: 6px; }
 
@@ -264,7 +271,7 @@
     <button class="icon-btn" id="secClose" style="margin-left:auto" aria-label="Close">&times;</button>
   </header>
   <div class="sec-body">
-    <div class="sec-tabs"><button class="on" data-st="scan">Scan</button><button data-st="q">Quarantine</button></div>
+    <div class="sec-tabs"><button class="on" data-st="scan">Scan</button><button data-st="q">Quarantine</button><button data-st="clean">Cleanup</button></div>
     <div id="secScan">
       <div class="row">
         <button class="btn primary" id="scanQuick">Quick scan</button>
@@ -278,6 +285,18 @@
       <div id="scanList"></div>
     </div>
     <div id="secQ" style="display:none"></div>
+    <div id="secClean" style="display:none">
+      <div class="row" style="margin-top:0">
+        <button class="btn primary" id="clScan">Check installed apps</button>
+        <button class="btn" id="clStop" style="display:none">Stop</button>
+        <button class="btn" id="clAsk">Ask AI what to remove</button>
+      </div>
+      <div class="note">Your own debloat tool. It lists every app with when you last opened it and suggests the ones you don't use.
+        Drivers, Windows parts, games launchers, Ollama, Python and other things your PC needs are protected and can't be picked.
+        Removing needs your PIN.</div>
+      <div id="clProg"></div>
+      <div id="clList"></div>
+    </div>
   </div>
 </div>
 
@@ -412,6 +431,7 @@ function botEl(m) {
   }
   if (m.hits && m.hits.length) d.innerHTML += `<div class="hits">${m.hits.slice(0, 10).map(rowHTML).join("")}</div>`;
   if (m.file) d.innerHTML += `<div class="meta">📎 Read ${esc(m.file)} from your PC</div>`;
+  if (m.cleanup) d.innerHTML += `<div class="row"><button class="btn primary" data-open-cleanup="1">🧹 Open Cleanup</button></div>`;
   if (m.took) d.innerHTML += `<div class="meta">Answered in ${fmtSec(m.took)}</div>`;
   if (m.content && !m.streaming) d.innerHTML += fbRow(m);
   return d;
@@ -538,6 +558,7 @@ async function sendChat(text) {
       if (ev.error) bot.error = ev.error;
       if (ev.checks) bot.checks = ev.checks;
       if (ev.files) bot.hits = ev.files;
+      if (ev.cleanup) bot.cleanup = true;
       if (ev.done) bot.sources = ev.sources;
     });
   } catch (e) { if (e.name !== "AbortError") bot.error = e.message; else bot.content += bot.content ? "\n\n_(stopped)_" : "_(stopped)_"; }
@@ -707,14 +728,20 @@ $("#pinIn").addEventListener("input", e => { if (e.target.value.length === 6) un
 /* ---------- security ---------- */
 let secPoll = null;
 const post = (url, body) => fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) }).then(r => r.json());
-function openSec() { $("#sec").style.display = "flex"; refreshScan(); if (!secPoll) secPoll = setInterval(refreshScan, 1000); }
+function openSec(tab) {
+  $("#sec").style.display = "flex"; refreshScan();
+  if (!secPoll) secPoll = setInterval(() => { refreshScan(); if ($("#secClean").style.display !== "none") refreshClean(); }, 1000);
+  if (typeof tab === "string") document.querySelector(`[data-st="${tab}"]`).click();
+}
 function closeSec() { $("#sec").style.display = "none"; clearInterval(secPoll); secPoll = null; }
-$("#secBtn").onclick = openSec; $("#secClose").onclick = closeSec;
+$("#secBtn").onclick = () => openSec(); $("#secClose").onclick = closeSec;
 document.querySelectorAll("[data-st]").forEach(b => b.onclick = () => {
   document.querySelectorAll("[data-st]").forEach(x => x.classList.toggle("on", x === b));
   $("#secScan").style.display = b.dataset.st === "scan" ? "" : "none";
   $("#secQ").style.display = b.dataset.st === "q" ? "" : "none";
+  $("#secClean").style.display = b.dataset.st === "clean" ? "" : "none";
   if (b.dataset.st === "q") loadQuarantine();
+  if (b.dataset.st === "clean") refreshClean(true);
 });
 const aiNotes = {}, actMsg = {};
 let lastScanKey = "";
@@ -804,6 +831,74 @@ $("#secQ").addEventListener("click", async e => {
   const r = await post("/api/scan/restore", b.dataset.qid ? { qid: b.dataset.qid } : { did: b.dataset.did });
   if (!r.ok) alert(r.error); loadQuarantine();
 });
+
+/* ---------- cleanup (debloat) ---------- */
+const CL = { picked: new Set(), msg: null, lastKey: "", showAll: false };
+async function refreshClean(force) {
+  let st; try { st = await fetch("/api/cleanup/status").then(r => r.json()); } catch { return; }
+  if (st.error === "locked") return showLock();
+  $("#clStop").style.display = st.running ? "" : "none";
+  $("#clScan").disabled = st.running;
+  let prog = "";
+  if (st.running) {
+    prog = `<div class="status"><div class="spin"></div><span>${esc(st.phase || "Working...")}</span></div>
+      <div class="bar"><div style="width:${st.pct || 0}%"></div></div>
+      <div class="meta">⏱ ${fmtSec(st.elapsed || 0)} elapsed · ${st.eta != null ? "about " + fmtSec(st.eta) + " left" : "estimating..."}</div>`;
+  } else if (st.kind === "remove" && st.started) {
+    prog = `<div class="badge ${st.error ? "warn" : "ok"}">${st.error ? "⚠ " + esc(st.error) : "✓ Cleanup finished in " + fmtSec(st.elapsed || 0)}</div>
+      ${st.results.length ? `<details open><summary>What happened</summary><div class="log">${esc(st.log.join("\n"))}</div></details>` : ""}`;
+  } else if (st.error) prog = `<div class="bad-msg">${esc(st.error)}</div>`;
+  $("#clProg").innerHTML = prog;
+  const key = JSON.stringify([st.scanned_at, st.running, [...CL.picked], CL.msg, CL.showAll, st.local]);
+  if (!force && key === CL.lastKey) return; CL.lastKey = key;
+  if (!st.apps) { $("#clList").innerHTML = st.running ? "" : '<div class="note">Tap <b>Check installed apps</b> to start (takes about a minute).</div>'; return; }
+  const sug = st.apps.filter(a => a.suggest), rest = st.apps.filter(a => !a.suggest && !a.protected), prot = st.apps.filter(a => a.protected);
+  const row = (key, name, why, mt, disabled, note) => `<label class="cl-row ${disabled ? "prot" : ""}">
+      <input type="checkbox" data-ck="${esc(key)}" ${CL.picked.has(key) ? "checked" : ""} ${disabled ? "disabled" : ""}>
+      <span class="nm">${esc(name)}${why ? `<div class="why">${esc(why)}</div>` : ""}${note ? `<div class="why">${esc(note)}</div>` : ""}</span>
+      <span class="mt">${mt}</span></label>`;
+  const appRow = a => row(a.key, a.name, a.why.join(" · "), `${a.size_mb ? a.size_mb + " MB<br>" : ""}${a.last_used ? "used " + esc(a.last_used) : "never used"}`,
+      a.protected || st.running, a.protected ? "Protected" : a.needs_pc && !st.local ? "Remove from the PC (its uninstaller opens a window)" : "");
+  const when = st.scanned_at ? new Date(st.scanned_at * 1000).toLocaleString() : "";
+  $("#clList").innerHTML = `
+    <h4 style="margin:8px 0">Settings to turn off</h4>
+    <div class="fl">${st.tweaks.map(t => row(t.kind + ":" + t.id, t.name, "", "", st.running, "")).join("")}</div>
+    <h4 style="margin:16px 0 8px">Suggested to remove (${sug.length})</h4>
+    <div class="fl">${sug.map(appRow).join("") || '<div class="cl-row">Nothing obvious - nice and clean.</div>'}</div>
+    <h4 style="margin:16px 0 8px">Other apps (${rest.length})</h4>
+    ${CL.showAll ? `<div class="fl">${rest.map(appRow).join("")}</div>
+      <h4 style="margin:16px 0 8px">Protected (${prot.length})</h4><div class="fl">${prot.map(appRow).join("")}</div>`
+      : `<button class="btn" id="clAll">Show all ${rest.length + prot.length} other apps</button>`}
+    <div class="note">List from ${esc(when)}.</div>
+    <div class="cl-sum"><b>${CL.picked.size} picked</b>
+      <input id="clPin" type="password" inputmode="numeric" maxlength="6" placeholder="PIN" autocomplete="off">
+      <button class="btn primary" id="clGo" ${CL.picked.size && !st.running ? "" : "disabled"} style="background:var(--bad)">Remove</button>
+      ${CL.msg ? `<span class="${CL.msg.ok ? "ok-msg" : "bad-msg"}">${esc(CL.msg.text)}</span>` : ""}</div>`;
+}
+$("#secClean").addEventListener("change", e => {
+  const k = e.target.dataset && e.target.dataset.ck; if (!k) return;
+  e.target.checked ? CL.picked.add(k) : CL.picked.delete(k); CL.msg = null; refreshClean(true);
+});
+$("#secClean").addEventListener("click", async e => {
+  const b = e.target.closest("button"); if (!b) return;
+  if (b.id === "clAll") { CL.showAll = true; return refreshClean(true); }
+  if (b.id === "clGo") {
+    const pin = $("#clPin").value.trim();
+    if (!pin) { CL.msg = { ok: false, text: "Enter your PIN first." }; return refreshClean(true); }
+    if (!confirm(`Remove ${CL.picked.size} item(s)? Protected system parts are always skipped. Some desktop programs may open their own uninstaller window on the PC.`)) return;
+    const r = await post("/api/cleanup/remove", { keys: [...CL.picked], pin });
+    CL.msg = r.ok ? { ok: true, text: `Removing ${r.count}...` + (r.refused.length ? " Skipped: " + r.refused.join("; ") : "") } : { ok: false, text: r.error };
+    if (r.ok) CL.picked.clear();
+    refreshClean(true);
+  }
+});
+$("#clScan").onclick = () => post("/api/cleanup/scan").then(() => refreshClean(true));
+$("#clStop").onclick = () => post("/api/cleanup/stop");
+$("#clAsk").onclick = () => {
+  closeSec(); setMode("chat");
+  input.value = "Which apps on my PC should I remove to debloat it? I want to get rid of things I never use."; send();
+};
+document.addEventListener("click", e => { if (e.target.closest("[data-open-cleanup]")) openSec("clean"); });
 
 /* ---------- files ---------- */
 const FL = { path: null, parent: null, sel: null };
