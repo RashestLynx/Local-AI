@@ -10,9 +10,9 @@ test-output/
 test-result.txt
 odysseus/
 # generated at runtime
-icon.png
-icon-192.png
-icon.ico
+/icon.png
+/icon-192.png
+/icon.ico
 __pycache__/
 *.pyc
 # pc-cleanup run outputs
