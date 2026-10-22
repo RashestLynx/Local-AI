@@ -76,7 +76,9 @@ def _days_since(date_str):
 class Debloat:
     def __init__(self, home):
         self.home = Path(home)
-        self.script = self.home / "tools" / "pc-cleanup" / "cleanup.ps1"
+        # Prefer the user's own PC Cleanup tool in Documents; fall back to the copy shipped with Local AI.
+        own = Path(os.path.expanduser("~")) / "Documents" / "PC Cleanup" / "cleanup.ps1"
+        self.script = own if own.exists() else self.home / "tools" / "pc-cleanup" / "cleanup.ps1"
         self.data = self.home / "cleanup"
         self.data.mkdir(exist_ok=True)
         self.apps_path = self.data / "installed-apps.json"
