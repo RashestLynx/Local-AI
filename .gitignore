@@ -27,3 +27,4 @@ mobile/android/
 mobile/ios/
 mobile/.flutter-plugins*
 mobile/pubspec.lock
+cleanup/
