@@ -22,7 +22,7 @@ $Start = Get-Date
 function Log($m) { $line = "$(Get-Date -Format 'HH:mm:ss')  $m"; Write-Host $line; Add-Content $Log $line }
 function Fmt($ts) { if ($ts.TotalHours -ge 1) { "{0:h\:mm\:ss}" -f $ts } else { "{0:m\:ss}" -f $ts } }
 
-$Protected = @("nvidia","\bamd\b","radeon","realtek","\bintel","armoury","\basus","\brog\b","steam","ollama","python",
+$Protected = @("visual studio","\bvs_","sdk","runtime","redistributable","framework","pawnio","librehardware","fancontrol","playstation","ubisoft","battle\.net","xbox","gaming services","launcher","anti-?cheat","battleye","vanguard","nvidia","\bamd\b","radeon","realtek","\bintel","armoury","\basus","\brog\b","steam","ollama","python",
                "\bgit\b","visual c\+\+","\.net","windows","driver","dolby","nahimic","claude","microsoft edge",
                "webview","microsoft store","defender","security","directx","vulkan","openal","rockstar","epic games","\bea app")
 function IsProtected($name) {

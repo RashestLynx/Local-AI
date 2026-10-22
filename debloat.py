@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 
 PROTECTED = re.compile(
-    r"nvidia|\bamd\b|radeon|realtek|\bintel|armoury|\basus|\brog\b|steam|ollama|python|\bgit\b|visual c\+\+|\.net|"
+    r"visual studio|\bvs_|sdk|runtime|redistributable|framework|pawnio|librehardware|fancontrol|playstation|ubisoft|battle\.net|xbox|gaming services|launcher|anti-?cheat|easyanticheat|battleye|vanguard|nvidia|\bamd\b|radeon|realtek|\bintel|armoury|\basus|\brog\b|steam|ollama|python|\bgit\b|visual c\+\+|\.net|"
     r"windows|driver|dolby|nahimic|claude|microsoft edge|webview|microsoft store|defender|security|directx|vulkan|"
     r"openal|rockstar|epic games|\bea app|tailscale|local ai", re.I)
 
